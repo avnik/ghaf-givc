@@ -40,11 +40,18 @@ message ApplicationResponse {
     string AppStatus = 2;
 }
 
+/*
+message ApplicationList {
+    repeated UnitStatus Applications = 1;
+}
+*/
+
 message Empty {
 }
 
 service AdminService {
     rpc RegisterService(RegistryRequest) returns (RegistryResponse) {}
+    //rpc ListQuery(Empty) returns (ApplicationList) {}
     rpc StartApplication(ApplicationRequest) returns (ApplicationResponse) {}
     rpc PauseApplication(ApplicationRequest) returns (ApplicationResponse) {}
     rpc ResumeApplication(ApplicationRequest) returns (ApplicationResponse) {}
