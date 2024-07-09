@@ -8,13 +8,33 @@ use tonic::{metadata::MetadataValue, Code, Request, Response, Status};
 type Client = pb::admin_service_client::AdminServiceClient<Channel>;
 
 #[derive(Debug, Serialize)]
+pub enum VMStatus {
+    Running,
+    PoweredOff,
+    Paused,
+}
+
+#[derive(Debug, Serialize)]
+pub enum TrustLevel {
+    Secure,
+    Warning,
+    NotSecure,
+}
+
+#[derive(Debug, Serialize)]
 pub struct QueryResult {
-    // FIXME: TBD
+    name: String,//VM name
+    description: String,//App name, some details
+    path: String,//?
+    status: VMStatus,
+    trust_level: TrustLevel,
 }
 
 #[derive(Debug, Serialize)]
 pub enum Event {
     SomethingHappens,
+    UnitStatusChanged(QueryResult),
+    ListUpdate(Vec<QueryResult>),
 }
 
 #[derive(Debug)]
@@ -60,15 +80,20 @@ impl AdminClient {
         todo!();
     }
 
-    pub async fn query(
+    pub async fn query(//?
         &self,
         _by_type: Option<UnitType>,
         _by_name: Vec<String>,
     ) -> anyhow::Result<Vec<QueryResult>> {
         todo!();
     }
+    
+    pub async fn list_query(&self,
+    ) -> anyhow::Result<Vec<QueryResult>> {
+        todo!();//rpc ListQuery(Empty) returns (ApplicationList) {}
+    }
 
-    pub async fn watch<F>(&self, callback: F) -> anyhow::Result<()>
+    pub async fn watch<F>(&self, callback: F) -> anyhow::Result<()>//QueryResult
     where
         F: Fn(Event) -> anyhow::Result<()>,
     {
