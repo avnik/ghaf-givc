@@ -1,5 +1,6 @@
 use std::path::{Path, PathBuf};
 use std::time::Duration;
+use std::sync::Arc;
 
 use anyhow::anyhow;
 use hyper_util::rt::TokioIo;
@@ -69,20 +70,13 @@ fn transport_config_to_url(ea: &EndpointAddress, with_tls: bool) -> String {
 }
 
 async fn connect_unix_socket(endpoint: Endpoint, path: &String) -> anyhow::Result<Channel> {
-    let mut path = Some(path.to_owned());
+    let path = Arc::new(path.to_owned());
     let ch = endpoint
         .connect_with_connector(service_fn(move |_: Uri| {
-            let path = path.take();
+            let path = path.clone();
             async move {
-                if let Some(path) = path {
-                    // Connect to a Uds socket
-                    Ok::<_, std::io::Error>(TokioIo::new(UnixStream::connect(path).await?))
-                } else {
-                    Err(std::io::Error::new(
-                        std::io::ErrorKind::Other,
-                        "Path already taken",
-                    ))
-                }
+               // Connect to a Uds socket
+               Ok::<_, std::io::Error>(TokioIo::new(UnixStream::connect(path.as_ref()).await?))
             }
         }))
         .await?;
