@@ -9,7 +9,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::Mutex;
 use tonic::{Code, Response, Status};
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, warn};
 
 pub use pb::admin_service_server::AdminServiceServer;
 
@@ -245,7 +245,7 @@ impl AdminServiceImpl {
             debug!("Monitoring {}...", entry.name);
             match self.get_remote_status(&entry).await {
                 Err(err) => {
-                    error!("could not get status of unit {}: {}", entry.name, err);
+                    warn!("could not get status of unit {}: {}", entry.name, err);
                     self.handle_error(entry)
                         .await
                         .context("during handle error")?
@@ -254,7 +254,7 @@ impl AdminServiceImpl {
                     let inactive = status.active_state != "active";
                     // Difference from "go" algorithm -- save new status before recovering attempt
                     if inactive {
-                        error!(
+                        warn!(
                             "Status of {} is {}, instead of active. Recovering.",
                             entry.name, status.active_state
                         )
