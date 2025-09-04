@@ -1,0 +1,15 @@
+@startuml
+actor Developer
+participant "CI/CD" as CI
+participant Cachix
+participant "Machine" as Machine
+
+Developer -> CI : push code
+CI -> CI : nixos-rebuild build
+CI -> Cachix : upload result of build
+CI -> Cachix : pin uploaded release
+Machine -> Cachix : enumerate pins via Cachix API
+Machine -> Cachix : nix copy pinned release
+Machine -> Machine : apply update (switch to generation)
+
+@enduml

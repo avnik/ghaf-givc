@@ -16,5 +16,8 @@ pkgs.mkShell {
     protobuf
     openssl
     grpcurl
+
+    # Diagrams renderer
+    mermaid-cli
   ];
 }

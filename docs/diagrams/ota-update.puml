@@ -1,0 +1,17 @@
+@startuml
+actor User 
+participant "Admin service" as Admin
+participant Agent
+participant "ota-update tool" as OTA
+participant Cachix
+
+User -> Admin : `givc-cli update cachix pin`
+Admin -> Agent : Invoke `ota-update cachix pin` (via gRPC)
+Agent -> OTA : Execute `ota-update tool`
+OTA -> Cachix : enumerate pins, find matched pin
+Cachix -> OTA : Download pinned release
+OTA -> OTA : apply update (switch to generation)
+OTA -> Agent : Feedback (logs/errors)
+Agent -> Admin : Feedback (logs/errors)
+
+@enduml

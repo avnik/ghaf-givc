@@ -1,0 +1,20 @@
+@startuml
+!include C4_Container.puml
+
+Person(dev, "Developer", "Writes and pushes code")
+
+System_Boundary(cicd_boundary, "CI/CD System") {
+    Container(ci, "CI/CD Pipeline", "Build system", "Builds artifacts and uploads pinned release to Cachix")
+}
+
+Container(cachix, "Cachix", "Binary cache", "Stores and serves pinned releases")
+
+Container(machine, "Target Machine", "NixOS Host", "Fetches pinned releases from Cachix and applies updates")
+
+Rel(dev, ci, "push code")
+Rel(ci, cachix, "build & upload pinned release")
+Rel(machine, cachix, "nix copy pinned release")
+Rel(machine, machine, "apply update (switch to generation)")
+
+@enduml
+

@@ -40,6 +40,10 @@
           pkgs.protoc-gen-go-grpc
           pkgs.grpcurl
           pkgs.protoc-gen-doc
+
+          # Diagram renderer
+          pkgs.mermaid-cli
+          pkgs.plantuml-c4
         ];
         packagesFrom = builtins.attrValues self'.packages;
         commands = [
