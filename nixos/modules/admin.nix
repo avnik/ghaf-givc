@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: 2024-2026 TII (SSRC) and the Ghaf contributors
 # SPDX-License-Identifier: Apache-2.0
-{ self }:
+{ self, ... }:
 {
   config,
   pkgs,
@@ -9,7 +9,7 @@
 }:
 let
   cfg = config.givc.admin;
-  inherit (self.packages.${pkgs.stdenv.hostPlatform.system}) givc-admin;
+  givc-admin = pkgs."givc-admin" or self.packages.${pkgs.system}."givc-admin";
   inherit (lib)
     mkOption
     mkEnableOption

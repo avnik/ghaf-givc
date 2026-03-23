@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: 2024-2026 TII (SSRC) and the Ghaf contributors
 # SPDX-License-Identifier: Apache-2.0
-{ self }:
+{ self, ... }:
 {
   config,
   pkgs,
@@ -58,7 +58,7 @@ in
 
   config =
     let
-      ota-update-server = self.packages.${pkgs.stdenv.hostPlatform.system}.givc-admin.update_server;
+      ota-update-server = pkgs."ota-update-server" or self.packages.${pkgs.system}."ota-update-server";
     in
     mkIf cfg.enable {
 

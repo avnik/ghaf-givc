@@ -4,11 +4,11 @@
 let
   pname = "givc-agent";
 in
-pkgs.buildGo124Module {
+pkgs.buildGoModule {
   inherit pname;
   version = "0.0.5";
   inherit src;
-  vendorHash = "sha256-i++cKWL1RHP4JPJs0n+Phlkf8S9zoT6QPIxHd01Imqs=";
+  vendorHash = "sha256-TTpZNsj56Ta9/LYHqOyAz6xgjYJOtsl8aWQk/F482Pk=";
   buildInputs = [ pkgs.systemd ]; # For libudev headers
   subPackages = [
     "modules/cmd/${pname}"

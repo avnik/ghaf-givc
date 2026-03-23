@@ -15,6 +15,9 @@ permissions:
 jobs:
   run-checks:
     runs-on: ${{ matrix.os }}
+    concurrency:
+      group: nix-checks-${{ matrix.arch }}
+      cancel-in-progress: false
     strategy:
       matrix:
         include:
@@ -24,7 +27,7 @@ jobs:
             os: "ubuntu-24.04-arm"
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@5ef0c079ce82195b2a36a210272d6b661572d83e # v2.14.2
+        uses: step-security/harden-runner@a90bcbc6539c36a85cdfeb73f7e2f433735f215b # v2.15.0
         with:
           egress-policy: audit
 
@@ -33,7 +36,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - name: Install nix
-        uses: cachix/install-nix-action@4e002c8ec80594ecd40e759629461e26c8abed15 # v31.9.0
+        uses: cachix/install-nix-action@19effe9fe722874e6d46dd7182e4b8b7a43c4a99 # v31.10.0
         with:
           enable_kvm: true
           extra_nix_config: "system-features = nixos-test benchmark big-parallel kvm"
@@ -42,4 +45,9 @@ jobs:
       - name: Check nix flake show runs successfully
         run: nix flake show --system ${{ matrix.arch }}
       - name: Run nix flake check
-        run: nix flake check --system ${{ matrix.arch }}
+        run: |
+          if [ "${{ matrix.arch }}" = "x86_64-linux" ]; then
+            nix flake check --system ${{ matrix.arch }} --max-jobs 1
+          else
+            nix flake check --system ${{ matrix.arch }}
+          fi

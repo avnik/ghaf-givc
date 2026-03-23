@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: 2024-2026 TII (SSRC) and the Ghaf contributors
 # SPDX-License-Identifier: Apache-2.0
-{ self }:
+{ self, ... }:
 {
   config,
   pkgs,
@@ -9,7 +9,8 @@
 }:
 let
   cfg = config.givc.host;
-  inherit (self.packages.${pkgs.stdenv.hostPlatform.system}) givc-agent ota-update;
+  givc-agent = pkgs."givc-agent" or self.packages.${pkgs.system}."givc-agent";
+  ota-update = pkgs."ota-update" or self.packages.${pkgs.system}."ota-update";
   inherit (lib)
     mkOption
     mkEnableOption
@@ -36,7 +37,7 @@ let
 in
 {
   options.givc.host = {
-    enable = mkEnableOption ''givc host agent module, which is responsible for managing system VMs and app VMs.'';
+    enable = mkEnableOption "givc host agent module, which is responsible for managing system VMs and app VMs.";
 
     network = {
       agent = {
@@ -78,7 +79,7 @@ in
                 protocol = "tcp";
                 port = "9001";
               };'';
-          description = ''Admin server transport configuration. This configuration tells the agent how to reach the admin server.'';
+          description = "Admin server transport configuration. This configuration tells the agent how to reach the admin server.";
         };
       };
       tls = mkOption {
@@ -235,6 +236,7 @@ in
         RestartSec = 1;
       };
       path = [
+        config.system.path
         ota-update
         pkgs.nix
         pkgs.nixos-rebuild
@@ -247,7 +249,7 @@ in
       in
       [ port ];
     environment.systemPackages = [
-      self.packages.${pkgs.stdenv.hostPlatform.system}.ota-update
+      ota-update
       pkgs.nixos-rebuild # Need for ota-update
     ];
     systemd.tmpfiles.rules = [

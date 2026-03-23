@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: 2024-2026 TII (SSRC) and the Ghaf contributors
 # SPDX-License-Identifier: Apache-2.0
-{ self }:
+{ self, ... }:
 {
   config,
   pkgs,
@@ -9,7 +9,7 @@
 }:
 let
   cfg = config.givc.sysvm;
-  inherit (self.packages.${pkgs.stdenv.hostPlatform.system}) givc-agent;
+  givc-agent = pkgs."givc-agent" or self.packages.${pkgs.system}."givc-agent";
   inherit (lib)
     mkIf
     mkOption
@@ -99,7 +99,7 @@ in
                 protocol = "tcp";
                 port = "9001";
               };'';
-          description = ''Admin server transport configuration. This configuration tells the agent how to reach the admin server.'';
+          description = "Admin server transport configuration. This configuration tells the agent how to reach the admin server.";
         };
       };
       tls = mkOption {
@@ -160,7 +160,7 @@ in
       };
 
       socketProxy = {
-        enable = mkEnableOption ''Socket proxy module to provide a VM-to-VM streaming mechanism with socket endpoints.'';
+        enable = mkEnableOption "Socket proxy module to provide a VM-to-VM streaming mechanism with socket endpoints.";
         sockets = mkOption {
           type = types.nullOr (types.listOf proxySubmodule);
           default = null;
