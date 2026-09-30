@@ -24,12 +24,18 @@ pub struct BootctlItem {
     pub source: String,
     pub id: String,
     pub path: PathBuf,
+    #[serde(default)]
     pub root: PathBuf,
+    #[serde(default)]
     pub title: String,
+    #[serde(default)]
     pub show_title: String,
+    #[serde(default)]
     pub sort_key: String,
+    #[serde(default)]
     pub version: String,
     pub machine_id: Option<String>,
+    #[serde(default)]
     pub options: String,
     pub linux: Option<PathBuf>,
     pub efi: Option<PathBuf>,
@@ -41,6 +47,7 @@ pub struct BootctlItem {
     #[serde(default)]
     pub is_selected: bool,
     pub addons: Option<Vec<BootctlAddon>>,
+    #[serde(default)]
     pub cmdline: String,
 }
 
