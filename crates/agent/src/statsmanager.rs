@@ -9,7 +9,7 @@ use std::sync::Mutex;
 use anyhow::{Result, bail};
 use givc_common::tonic::RewrapErr;
 use procfs::Current;
-use tonic::{Request, Response, Status};
+use tonic::Status;
 
 pub use givc_common::pb::stats::stats_service_server::StatsServiceServer;
 
@@ -118,23 +118,20 @@ impl StatsServer {
     }
 }
 
-#[tonic::async_trait]
+#[grpc_server]
 impl givc_common::pb::stats::stats_service_server::StatsService for StatsServer {
     async fn get_stats(
         &self,
-        _request: Request<givc_common::pb::stats::StatsRequest>,
-    ) -> Result<Response<givc_common::pb::stats::StatsResponse>, Status> {
-        self.controller.get_stats().map(Response::new).rewrap_err()
+        _request: givc_common::pb::stats::StatsRequest,
+    ) -> Result<givc_common::pb::stats::StatsResponse, Status> {
+        self.controller.get_stats().rewrap_err()
     }
 
     async fn get_sysinfo(
         &self,
-        _request: Request<givc_common::pb::stats::StatsRequest>,
-    ) -> Result<Response<givc_common::pb::stats::SysinfoResponse>, Status> {
-        self.controller
-            .get_sysinfo()
-            .map(Response::new)
-            .rewrap_err()
+        _request: givc_common::pb::stats::StatsRequest,
+    ) -> Result<givc_common::pb::stats::SysinfoResponse, Status> {
+        self.controller.get_sysinfo().rewrap_err()
     }
 }
 

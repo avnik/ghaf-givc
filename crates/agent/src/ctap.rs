@@ -31,33 +31,27 @@ impl CtapService {
     }
 }
 
-#[tonic::async_trait]
+#[grpc_server]
 impl pb::ctap::ctap_server::Ctap for CtapService {
-    async fn ctap(
-        &self,
-        request: Request<pb::ctap::CtapRequest>,
-    ) -> Result<Response<pb::ctap::CtapResponse>, Status> {
-        let req = request.into_inner();
-        let prog = Self::resolve_program(&req.req).rewrap_err()?;
+    async fn ctap(&self, request: pb::ctap::CtapRequest) -> Result<pb::ctap::CtapResponse, Status> {
+        let prog = Self::resolve_program(&request.req).rewrap_err()?;
 
         let mut cmd = Command::new(prog);
-        cmd.args(req.args);
+        cmd.args(request.args);
         cmd.stdin(Stdio::piped());
 
-        let mut child = cmd
-            .spawn()
-            .map_err(|err| Status::internal(err.to_string()))?;
+        let mut child = cmd.spawn()?;
         if let Some(mut stdin) = child.stdin.take() {
-            let _ = stdin.write_all(&req.payload).await;
+            let _ = stdin.write_all(&request.payload).await;
         }
 
         let output = child
             .wait_with_output()
             .await
             .map_err(|err| Status::internal(err.to_string()))?;
-        Ok(Response::new(pb::ctap::CtapResponse {
+        Ok(pb::ctap::CtapResponse {
             output: output.stdout,
-        }))
+        })
     }
 }
 

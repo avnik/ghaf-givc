@@ -32,6 +32,7 @@ tokio-listener = { workspace = true, features = [
   "tonic014",
 ] }
 tokio-vsock.workspace = true
+thiserror.workspace = true
 tonic-middleware.workspace = true
 tonic-reflection.workspace = true
 tonic-types.workspace = true
@@ -46,4 +47,5 @@ lazy-regex = "3.6.0"
 givc-policyadmin = { path = "../policyadmin" }
 givc-common = { path = "../common" }
 givc-client = { path = "../client" }
+givc-macros = { path = "../macros" }
 ota-update = { path = "../ota-update" }

@@ -71,7 +71,7 @@ impl Authorizer {
         mut context_json: serde_json::Value,
     ) -> Result<(), Status> {
         let (module_name, service_name) = full_service_name.split_once('.').ok_or_else(|| {
-            Status::internal(format!("Invalid service name format: {full_service_name}"))
+            Status::invalid_argument(format!("invalid service name format: {full_service_name}"))
         })?;
 
         if module_name.trim().is_empty()
@@ -79,8 +79,8 @@ impl Authorizer {
             || grpc_method_name.trim().is_empty()
             || source.trim().is_empty()
         {
-            return Err(Status::internal(format!(
-                "Invalid service name format (empty tokens): {full_service_name}"
+            return Err(Status::invalid_argument(format!(
+                "invalid service name format (empty tokens): {full_service_name}"
             )));
         }
 
@@ -141,9 +141,7 @@ impl RequestInterceptor for Authorizer {
             .and_then(|sec_info| sec_info.hostname().map(String::from))
             .ok_or_else(|| {
                 error!("SecurityInfo extension or hostname is missing");
-                Status::internal(
-                    "Cedar authorization denied: SecurityInfo extension or hostname is missing",
-                )
+                Status::unauthenticated("authentication information is missing")
             })?;
 
         let (parts, mut body) = req.into_parts();
@@ -178,7 +176,7 @@ impl RequestInterceptor for Authorizer {
             return Ok(HttpRequest::from_parts(parts, body));
         }
 
-        Err(Status::internal("Cedar authorization denied: Bad request"))
+        Err(Status::invalid_argument("bad gRPC request path"))
     }
 }
 

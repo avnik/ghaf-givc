@@ -15,6 +15,7 @@ evdev = "0.13.2"
 http-body-util.workspace = true
 givc-client = { path = "../client" }
 givc-common = { path = "../common" }
+givc-macros = { path = "../macros" }
 libc = "0.2.177"
 nix = { version = "0.31.3", features = ["fs", "ioctl", "signal", "user"] }
 procfs = "0.18.0"
@@ -46,4 +47,5 @@ zbus_systemd = { version = "0.26100.0", default-features = false, features = [
   "zbus-async-tokio",
 ] }
 tokio-vsock.workspace = true
+thiserror.workspace = true
 url = "2.5.7"

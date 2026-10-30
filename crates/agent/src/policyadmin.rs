@@ -11,7 +11,7 @@ use sha2::{Digest, Sha256};
 use tokio::fs;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio_stream::StreamExt;
-use tonic::{Request, Response, Status};
+use tonic::Status;
 
 pub use pb::policyadmin::policy_admin_server::PolicyAdminServer as PolicyAdminServerServer;
 
@@ -97,19 +97,18 @@ impl PolicyAdminServer {
     }
 }
 
-#[tonic::async_trait]
+#[grpc_server]
 impl pb::policyadmin::policy_admin_server::PolicyAdmin for PolicyAdminServer {
     async fn stream_policy(
         &self,
-        request: Request<tonic::Streaming<pb::policyadmin::StreamPolicyRequest>>,
-    ) -> Result<Response<pb::policyadmin::Status>, Status> {
-        let mut stream = request.into_inner();
+        request: tonic::Streaming<pb::policyadmin::StreamPolicyRequest>,
+    ) -> Result<pb::policyadmin::Status, Status> {
         let mut policy_name = String::new();
         let mut temp_file: Option<PathBuf> = None;
         let mut first_chunk = true;
 
-        while let Some(chunk) = stream.next().await {
-            let req = chunk.map_err(|err| Status::internal(err.to_string()))?;
+        while let Some(chunk) = request.next().await {
+            let req = chunk?;
 
             if first_chunk {
                 first_chunk = false;
@@ -149,9 +148,9 @@ impl pb::policyadmin::policy_admin_server::PolicyAdmin for PolicyAdminServer {
             .rewrap_err()?;
 
         let _ = fs::remove_file(&policy_file_path).await;
-        Ok(Response::new(pb::policyadmin::Status {
+        Ok(pb::policyadmin::Status {
             status: "Success".to_owned(),
-        }))
+        })
     }
 }
 

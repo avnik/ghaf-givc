@@ -23,7 +23,7 @@ use tokio::sync::mpsc;
 use tokio_stream::StreamExt;
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::transport::Server;
-use tonic::{Request, Response, Status};
+use tonic::{Request, Status};
 use tracing::{error, info, warn};
 
 use crate::config::{AgentConfig, EventConfig};
@@ -202,26 +202,24 @@ impl EventProxyServer {
     }
 }
 
-#[tonic::async_trait]
+#[grpc_server]
 impl pb::eventproxy::event_service_server::EventService for EventProxyServer {
     async fn register_device(
         &self,
-        request: Request<pb::eventproxy::DeviceInfo>,
-    ) -> Result<Response<pb::eventproxy::Ack>, Status> {
-        let info = request.into_inner();
-        self.controller.register_device(&info).rewrap_err()?;
-        Ok(Response::new(pb::eventproxy::Ack {
+        request: pb::eventproxy::DeviceInfo,
+    ) -> Result<pb::eventproxy::Ack, Status> {
+        self.controller.register_device(&request).rewrap_err()?;
+        Ok(pb::eventproxy::Ack {
             status: "OK".to_owned(),
-        }))
+        })
     }
 
     async fn stream_events(
         &self,
-        request: Request<tonic::Streaming<pb::eventproxy::InputEvent>>,
-    ) -> Result<Response<pb::eventproxy::Ack>, Status> {
-        let mut stream = request.into_inner();
+        request: tonic::Streaming<pb::eventproxy::InputEvent>,
+    ) -> Result<pb::eventproxy::Ack, Status> {
         loop {
-            match stream.next().await {
+            match request.next().await {
                 Some(Ok(event)) => {
                     self.controller.stream_event(&event).rewrap_err()?;
                 }
@@ -230,9 +228,9 @@ impl pb::eventproxy::event_service_server::EventService for EventProxyServer {
                     return Err(Status::internal(err.to_string()));
                 }
                 None => {
-                    return Ok(Response::new(pb::eventproxy::Ack {
+                    return Ok(pb::eventproxy::Ack {
                         status: "OK".to_owned(),
-                    }));
+                    });
                 }
             }
         }

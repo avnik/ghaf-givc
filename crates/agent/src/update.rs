@@ -7,7 +7,8 @@ use tokio::process::Command;
 use tokio::sync::mpsc;
 use tokio_stream::Stream;
 use tokio_stream::wrappers::ReceiverStream;
-use tonic::{Request, Response, Status};
+use tonic::Status;
+use tracing::error;
 
 use givc_common::pb::update::{
     self, AvailableUpdate, Generation, ImageInstallRequest, ImageInstallResponse,
@@ -16,6 +17,7 @@ use givc_common::pb::update::{
     RegistryPullResponse, SetGenerationResponse,
     update_server::{Update, UpdateServer},
 };
+use givc_macros::grpc_server;
 
 use crate::config::UpdateConfig;
 
@@ -33,24 +35,23 @@ impl UpdateService {
     }
 }
 
-#[tonic::async_trait]
+#[grpc_server]
 impl Update for UpdateService {
     async fn list_generations(
         &self,
-        _request: Request<update::Empty>,
-    ) -> Result<Response<ListGenerationsResponse>, Status> {
+        _request: update::Empty,
+    ) -> Result<ListGenerationsResponse, Status> {
         let output = run_command(["get".to_owned()]).await?;
         let generations: Vec<GenerationDetails> = serde_json::from_slice(&output.stdout)
             .map_err(|err| Status::internal(format!("failed to parse generations: {err}")))?;
         let list = generations.into_iter().map(Generation::from).collect();
-        Ok(Response::new(ListGenerationsResponse { list }))
+        Ok(ListGenerationsResponse { list })
     }
 
     async fn discover(
         &self,
-        request: Request<RegistryDiscoverRequest>,
-    ) -> Result<Response<RegistryDiscoverResponse>, Status> {
-        let request = request.into_inner();
+        request: RegistryDiscoverRequest,
+    ) -> Result<RegistryDiscoverResponse, Status> {
         let mut args = registry_prefix(request.insecure, request.credentials.as_ref());
         args.extend(["discover".to_owned(), request.reference]);
         let output = run_command(args).await?;
@@ -58,14 +59,13 @@ impl Update for UpdateService {
             .into_iter()
             .map(Into::into)
             .collect();
-        Ok(Response::new(RegistryDiscoverResponse { list }))
+        Ok(RegistryDiscoverResponse { list })
     }
 
     async fn changelog(
         &self,
-        request: Request<RegistryChangelogRequest>,
-    ) -> Result<Response<RegistryChangelogResponse>, Status> {
-        let request = request.into_inner();
+        request: RegistryChangelogRequest,
+    ) -> Result<RegistryChangelogResponse, Status> {
         let mut args = registry_prefix(request.insecure, request.credentials.as_ref());
         args.extend(["changelog".to_owned(), request.reference]);
         let output = run_command(args).await?;
@@ -81,16 +81,12 @@ impl Update for UpdateService {
             .map(String::from_utf8_lossy)
             .collect::<Vec<_>>()
             .join("\n");
-        Ok(Response::new(RegistryChangelogResponse { changelog }))
+        Ok(RegistryChangelogResponse { changelog })
     }
 
     type PullStream = Pin<Box<dyn Stream<Item = Result<RegistryPullResponse, Status>> + Send>>;
 
-    async fn pull(
-        &self,
-        request: Request<RegistryPullRequest>,
-    ) -> Result<Response<Self::PullStream>, Status> {
-        let request = request.into_inner();
+    async fn pull(&self, request: RegistryPullRequest) -> Result<Self::PullStream, Status> {
         let mut args = registry_prefix(request.insecure, request.credentials.as_ref());
         args.extend([
             "pull".to_owned(),
@@ -100,7 +96,8 @@ impl Update for UpdateService {
             "--validate".to_owned(),
         ]);
         let stream = pull_stream(args).await?;
-        Ok(Response::new(Box::pin(stream)))
+        let stream: Self::PullStream = Box::pin(stream);
+        Ok(stream)
     }
 
     type ImageInstallStream =
@@ -108,10 +105,9 @@ impl Update for UpdateService {
 
     async fn image_install(
         &self,
-        request: Request<ImageInstallRequest>,
-    ) -> Result<Response<Self::ImageInstallStream>, Status> {
+        request: ImageInstallRequest,
+    ) -> Result<Self::ImageInstallStream, Status> {
         validate_trust(&self.config)?;
-        let request = request.into_inner();
         let mut args = vec![
             "image".to_owned(),
             "install".to_owned(),
@@ -133,7 +129,8 @@ impl Update for UpdateService {
         };
         args.extend(["--signature".to_owned(), signature]);
         let stream = output_stream::<ImageInstallResponse>(args).await?;
-        Ok(Response::new(Box::pin(stream)))
+        let stream: Self::ImageInstallStream = Box::pin(stream);
+        Ok(stream)
     }
 
     type InstallCachixStream =
@@ -141,9 +138,8 @@ impl Update for UpdateService {
 
     async fn install_cachix(
         &self,
-        request: Request<update::Cachix>,
-    ) -> Result<Response<Self::InstallCachixStream>, Status> {
-        let request = request.into_inner();
+        request: update::Cachix,
+    ) -> Result<Self::InstallCachixStream, Status> {
         let mut args = vec![
             "cachix".to_owned(),
             request.pin,
@@ -157,7 +153,8 @@ impl Update for UpdateService {
             args.extend(["--cachix-host".to_owned(), host]);
         }
         let stream = output_stream::<SetGenerationResponse>(args).await?;
-        Ok(Response::new(Box::pin(stream)))
+        let stream: Self::InstallCachixStream = Box::pin(stream);
+        Ok(stream)
     }
 }
 
@@ -174,10 +171,12 @@ where
     if output.status.success() {
         Ok(output)
     } else {
-        Err(Status::unknown(format!(
-            "ota-update failed: {}",
-            String::from_utf8_lossy(&output.stderr).trim()
-        )))
+        error!(
+            status = ?output.status,
+            stderr = %String::from_utf8_lossy(&output.stderr).trim(),
+            "ota-update command failed"
+        );
+        Err(Status::internal("ota-update command failed"))
     }
 }
 
@@ -307,10 +306,9 @@ where
                 }
             }
             Ok(status) => {
+                error!(status = ?status, "ota-update pull command failed");
                 let _ = tx
-                    .send(Err(Status::unknown(format!(
-                        "ota-update exited with {status}"
-                    ))))
+                    .send(Err(Status::internal("ota-update command failed")))
                     .await;
             }
             Err(err) => {

@@ -5,7 +5,6 @@ use std::collections::HashSet;
 use std::process::Stdio;
 use std::sync::Arc;
 
-use anyhow::{Result, bail};
 use givc_common::pb;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt};
 use tokio::process::Command;
@@ -13,7 +12,7 @@ use tokio::sync::Mutex;
 use tokio::sync::mpsc;
 use tokio_stream::StreamExt;
 use tokio_stream::wrappers::ReceiverStream;
-use tonic::{Request, Response, Status};
+use tonic::Status;
 
 pub use pb::exec::exec_server::ExecServer as ExecServiceServer;
 
@@ -30,28 +29,28 @@ impl ExecService {
         }
     }
 
-    fn validate_command(&self, cmd: &str) -> Result<()> {
+    fn validate_command(&self, cmd: &str) -> Result<(), Status> {
         if self.allowed_commands.contains(cmd) {
             Ok(())
         } else {
-            bail!("access denied: command \"{cmd}\" is not allowed")
+            Err(Status::permission_denied(format!(
+                "access denied: command \"{cmd}\" is not allowed"
+            )))
         }
     }
 }
 
-#[tonic::async_trait]
+#[grpc_server]
 impl pb::exec::exec_server::Exec for ExecService {
     type RunCommandStream = ReceiverStream<Result<pb::exec::CommandResponse, Status>>;
 
     async fn run_command(
         &self,
-        request: Request<tonic::Streaming<pb::exec::CommandRequest>>,
-    ) -> Result<Response<Self::RunCommandStream>, Status> {
-        let mut inbound = request.into_inner();
-        let first = inbound
+        request: tonic::Streaming<pb::exec::CommandRequest>,
+    ) -> Result<Self::RunCommandStream, Status> {
+        let first = request
             .message()
-            .await
-            .map_err(|err| Status::internal(err.to_string()))?
+            .await?
             .ok_or_else(|| Status::invalid_argument("failed to receive start command"))?;
 
         let start = match first.command {
@@ -63,7 +62,7 @@ impl pb::exec::exec_server::Exec for ExecService {
             }
         };
 
-        self.validate_command(&start.command).map_err(map_err)?;
+        self.validate_command(&start.command)?;
 
         let (tx, rx) = mpsc::channel(32);
         let mut cmd = Command::new(&start.command);
@@ -136,7 +135,7 @@ impl pb::exec::exec_server::Exec for ExecService {
             let signal_pid = pid;
             let tx = tx.clone();
             tokio::spawn(async move {
-                while let Some(msg) = inbound.next().await {
+                while let Some(msg) = request.next().await {
                     let Ok(msg) = msg else {
                         break;
                     };
@@ -176,7 +175,7 @@ impl pb::exec::exec_server::Exec for ExecService {
                 .await;
         });
 
-        Ok(Response::new(ReceiverStream::new(rx)))
+        Ok(ReceiverStream::new(rx))
     }
 }
 

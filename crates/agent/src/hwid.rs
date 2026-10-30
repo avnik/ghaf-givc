@@ -6,7 +6,8 @@ use std::path::Path;
 
 use anyhow::{Context, Result, bail};
 use givc_common::pb;
-use tonic::{Request, Response, Status};
+use givc_macros::grpc_server;
+use tonic::Status;
 
 pub use pb::hwid::hwid_service_server::HwidServiceServer;
 
@@ -40,14 +41,14 @@ impl HwIdServer {
     }
 }
 
-#[tonic::async_trait]
+#[grpc_server]
 impl pb::hwid::hwid_service_server::HwidService for HwIdServer {
     async fn get_hw_id(
         &self,
-        _request: Request<pb::hwid::HwIdRequest>,
-    ) -> Result<Response<pb::hwid::HwIdResponse>, Status> {
-        let identifier = self.get_identifier().map_err(map_err)?;
-        Ok(Response::new(pb::hwid::HwIdResponse { identifier }))
+        _request: pb::hwid::HwIdRequest,
+    ) -> Result<pb::hwid::HwIdResponse, Status> {
+        let identifier = self.get_identifier()?;
+        Ok(pb::hwid::HwIdResponse { identifier })
     }
 }
 

@@ -1443,6 +1443,7 @@ dependencies = [
  "clap",
  "givc-client",
  "givc-common",
+ "givc-macros",
  "givc-policyadmin",
  "http",
  "http-body-util",
@@ -1452,6 +1453,7 @@ dependencies = [
  "regex",
  "serde",
  "serde_json",
+ "thiserror 2.0.20",
  "tokio",
  "tokio-listener",
  "tokio-stream",
@@ -1477,6 +1479,7 @@ dependencies = [
  "futures-util",
  "givc-client",
  "givc-common",
+ "givc-macros",
  "http",
  "http-body-util",
  "libc",
@@ -1488,6 +1491,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2 0.10.9",
+ "thiserror 2.0.20",
  "tokio",
  "tokio-stream",
  "tokio-vsock",
@@ -1534,6 +1538,15 @@ dependencies = [
  "tonic",
  "tonic-prost",
  "tonic-prost-build",
+]
+
+[[package]]
+name = "givc-macros"
+version = "0.0.1"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.118",
 ]
 
 [[package]]

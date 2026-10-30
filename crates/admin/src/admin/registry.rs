@@ -7,6 +7,7 @@ use std::time::Duration;
 
 use anyhow::{Context, anyhow, bail};
 use givc_common::query::{Event, QueryResult};
+use thiserror::Error;
 use tokio::sync::broadcast;
 use tracing::{debug, info};
 
@@ -20,16 +21,9 @@ use crate::utils::naming::parse_vm_name;
 /// recognised by type rather than by matching on its message. During startup a
 /// client may poll admin for a VM's agent before that VM has registered, which
 /// is expected rather than a fault.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Error)]
+#[error("service {0} is not registered")]
 pub(crate) struct NotRegistered(pub String);
-
-impl std::fmt::Display for NotRegistered {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Service {} not registered", self.0)
-    }
-}
-
-impl std::error::Error for NotRegistered {}
 
 #[derive(Clone, Debug)]
 pub struct Registry {

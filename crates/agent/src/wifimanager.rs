@@ -8,8 +8,9 @@ use std::time::Duration;
 use anyhow::{Context, Result, bail};
 use givc_common::{pb, tonic::RewrapErr};
 use serde_json::Value as JsonValue;
+use thiserror::Error;
 use tokio::time::sleep;
-use tonic::{Request, Response, Status};
+use tonic::Status;
 use zbus::zvariant::{OwnedObjectPath, OwnedValue, Value};
 use zbus::{Connection, Proxy};
 
@@ -19,6 +20,16 @@ const NM_SERVICE: &str = "org.freedesktop.NetworkManager";
 const NM_PATH: &str = "/org/freedesktop/NetworkManager";
 const IFACE_NM: &str = "org.freedesktop.NetworkManager";
 const IFACE_DEVICE: &str = "org.freedesktop.NetworkManager.Device";
+
+#[derive(Debug, Error)]
+#[error("invalid Wi-Fi settings: {0}")]
+struct WifiRequestError(String);
+
+impl WifiRequestError {
+    fn invalid(message: impl Into<String>) -> Self {
+        Self(message.into())
+    }
+}
 const IFACE_DEVICE_WIRELESS: &str = "org.freedesktop.NetworkManager.Device.Wireless";
 const IFACE_ACCESS_POINT: &str = "org.freedesktop.NetworkManager.AccessPoint";
 const IFACE_CONNECTION_ACTIVE: &str = "org.freedesktop.NetworkManager.Connection.Active";
@@ -216,12 +227,12 @@ impl WifiService {
     }
 }
 
-#[tonic::async_trait]
+#[grpc_server]
 impl pb::wifi::wifi_service_server::WifiService for WifiService {
     async fn list_network(
         &self,
-        _request: Request<pb::wifi::WifiNetworkRequest>,
-    ) -> Result<Response<pb::wifi::WifiNetworkResponse>, Status> {
+        _request: pb::wifi::WifiNetworkRequest,
+    ) -> Result<pb::wifi::WifiNetworkResponse, Status> {
         let mut networks = Vec::new();
         for device_path in self.backend.wifi_devices().await.rewrap_err()? {
             for ap_path in self
@@ -235,7 +246,7 @@ impl pb::wifi::wifi_service_server::WifiService for WifiService {
             }
         }
 
-        Ok(Response::new(pb::wifi::WifiNetworkResponse { networks }))
+        Ok(pb::wifi::WifiNetworkResponse { networks })
     }
 
     async fn get_active_connection(
@@ -246,19 +257,18 @@ impl pb::wifi::wifi_service_server::WifiService for WifiService {
             return Ok(Response::new(ap.into()));
         }
 
-        Ok(Response::new(pb::wifi::AccessPoint {
+        Ok(pb::wifi::AccessPoint {
             connection: false,
             ssid: String::new(),
             signal: 0,
             security: String::new(),
-        }))
+        })
     }
 
     async fn connect_network(
         &self,
-        request: Request<pb::wifi::WifiConnectionRequest>,
-    ) -> Result<Response<pb::wifi::WifiConnectionResponse>, Status> {
-        let req = request.into_inner();
+        request: pb::wifi::WifiConnectionRequest,
+    ) -> Result<pb::wifi::WifiConnectionResponse, Status> {
         let response = self
             .backend
             .connect(&req.ssid, &req.password, &req.settings)
@@ -374,15 +384,18 @@ fn build_connection_settings(ssid: &str, password: &str, keymgmt: &str) -> Resul
 }
 
 fn merge_settings(mut base: Settings, raw: &str) -> Result<Settings> {
-    let parsed: JsonValue =
-        serde_json::from_str(raw).context("failed to parse extension settings")?;
+    let parsed: JsonValue = serde_json::from_str(raw)
+        .map_err(|err| WifiRequestError::invalid(format!("failed to parse JSON: {err}")))?;
     let JsonValue::Object(sections) = parsed else {
-        bail!("extension settings must be a JSON object");
+        return Err(WifiRequestError::invalid("extension settings must be a JSON object").into());
     };
 
     for (section, values) in sections {
         let JsonValue::Object(keys) = values else {
-            bail!("extension section '{section}' must be a JSON object");
+            return Err(WifiRequestError::invalid(format!(
+                "extension section '{section}' must be a JSON object"
+            ))
+            .into());
         };
 
         let entry = base.entry(section).or_default();
@@ -396,7 +409,7 @@ fn merge_settings(mut base: Settings, raw: &str) -> Result<Settings> {
 
 fn json_value_to_owned(value: JsonValue) -> Result<OwnedValue> {
     match value {
-        JsonValue::Null => bail!("null is not supported in wifi settings"),
+        JsonValue::Null => Err(WifiRequestError::invalid("null is not supported").into()),
         JsonValue::Bool(v) => Ok(OwnedValue::try_from(Value::new(v))?),
         JsonValue::Number(v) if v.is_i64() => {
             Ok(OwnedValue::try_from(Value::new(v.as_i64().unwrap()))?)
@@ -420,6 +433,14 @@ fn json_value_to_owned(value: JsonValue) -> Result<OwnedValue> {
             }
             Ok(OwnedValue::try_from(Value::new(map))?)
         }
+    }
+}
+
+fn map_connect_error(error: anyhow::Error) -> Status {
+    if error.downcast_ref::<WifiRequestError>().is_some() {
+        Status::invalid_argument("invalid Wi-Fi settings")
+    } else {
+        Status::internal("Wi-Fi connection failed")
     }
 }
 
@@ -459,5 +480,19 @@ mod tests {
         let merged =
             merge_settings(base, r#"{"802-11-wireless-security":{"proto":"rsn"}}"#).unwrap();
         assert!(merged["802-11-wireless-security"].contains_key("proto"));
+    }
+
+    #[test]
+    fn invalid_extension_settings_are_invalid_arguments() {
+        let error = merge_settings(
+            build_connection_settings("ssid", "pass", "wpa-eap").unwrap(),
+            "[]",
+        )
+        .expect_err("array settings are invalid");
+
+        assert_eq!(
+            map_connect_error(error).code(),
+            tonic::Code::InvalidArgument
+        );
     }
 }

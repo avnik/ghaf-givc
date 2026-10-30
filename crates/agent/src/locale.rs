@@ -7,7 +7,7 @@ use std::process::Command;
 use anyhow::{Context, Result, bail, ensure};
 use givc_common::{pb, tonic::RewrapErr};
 use regex::Regex;
-use tonic::{Request, Response, Status};
+use tonic::Status;
 
 pub use pb::locale::locale_client_server::LocaleClientServer;
 
@@ -60,24 +60,22 @@ impl LocaleServer {
     }
 }
 
-#[tonic::async_trait]
+#[grpc_server]
 impl pb::locale::locale_client_server::LocaleClient for LocaleServer {
     async fn locale_set(
         &self,
-        request: Request<pb::locale::LocaleMessage>,
-    ) -> Result<Response<pb::locale::Empty>, Status> {
-        let req = request.into_inner();
-        self.set_locale(&req.assignments).rewrap_err()?;
-        Ok(Response::new(pb::locale::Empty {}))
+        request: pb::locale::LocaleMessage,
+    ) -> Result<pb::locale::Empty, Status> {
+        self.set_locale(&request.assignments).rewrap_err()?;
+        Ok(pb::locale::Empty {})
     }
 
     async fn timezone_set(
         &self,
-        request: Request<pb::locale::TimezoneMessage>,
-    ) -> Result<Response<pb::locale::Empty>, Status> {
-        let req = request.into_inner();
-        self.set_timezone(&req.timezone).rewrap_err()?;
-        Ok(Response::new(pb::locale::Empty {}))
+        request: pb::locale::TimezoneMessage,
+    ) -> Result<pb::locale::Empty, Status> {
+        self.set_timezone(&request.timezone).rewrap_err()?;
+        Ok(pb::locale::Empty {})
     }
 }
 
@@ -117,6 +115,8 @@ fn is_root() -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use pb::locale::locale_client_server::LocaleClient;
+    use tonic::Request;
 
     #[test]
     fn validates_timezone() {
@@ -142,5 +142,18 @@ mod tests {
         let server = LocaleServer::new();
         let err = server.set_locale(&[]).unwrap_err();
         assert!(err.to_string().contains("no locale assignments"));
+    }
+
+    #[tokio::test]
+    async fn handler_reports_invalid_timezone() {
+        let server = LocaleServer::new();
+        let err = server
+            .timezone_set(Request::new(pb::locale::TimezoneMessage {
+                timezone: "not a timezone".to_owned(),
+            }))
+            .await
+            .expect_err("invalid timezone is rejected");
+
+        assert_eq!(err.code(), tonic::Code::InvalidArgument);
     }
 }

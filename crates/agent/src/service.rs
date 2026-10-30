@@ -3,7 +3,8 @@
 
 use std::pin::Pin;
 
-use tonic::{Request, Response, Status};
+use givc_macros::grpc_server;
+use tonic::Status;
 
 pub use givc_common::pb::systemd::unit_control_service_server::UnitControlServiceServer;
 
@@ -19,49 +20,49 @@ impl UnitControlService {
     }
 }
 
-#[tonic::async_trait]
+#[grpc_server]
 impl givc_common::pb::systemd::unit_control_service_server::UnitControlService
     for UnitControlService
 {
     async fn get_unit_status(
         &self,
-        _request: Request<givc_common::pb::systemd::UnitRequest>,
-    ) -> Result<Response<givc_common::pb::systemd::UnitResponse>, Status> {
+        _request: givc_common::pb::systemd::UnitRequest,
+    ) -> Result<givc_common::pb::systemd::UnitResponse, Status> {
         Err(Status::unimplemented("agent boilerplate"))
     }
 
     async fn start_unit(
         &self,
-        _request: Request<givc_common::pb::systemd::UnitRequest>,
-    ) -> Result<Response<givc_common::pb::systemd::UnitResponse>, Status> {
+        _request: givc_common::pb::systemd::UnitRequest,
+    ) -> Result<givc_common::pb::systemd::UnitResponse, Status> {
         Err(Status::unimplemented("agent boilerplate"))
     }
 
     async fn stop_unit(
         &self,
-        _request: Request<givc_common::pb::systemd::UnitRequest>,
-    ) -> Result<Response<givc_common::pb::systemd::UnitResponse>, Status> {
+        _request: givc_common::pb::systemd::UnitRequest,
+    ) -> Result<givc_common::pb::systemd::UnitResponse, Status> {
         Err(Status::unimplemented("agent boilerplate"))
     }
 
     async fn kill_unit(
         &self,
-        _request: Request<givc_common::pb::systemd::UnitRequest>,
-    ) -> Result<Response<givc_common::pb::systemd::UnitResponse>, Status> {
+        _request: givc_common::pb::systemd::UnitRequest,
+    ) -> Result<givc_common::pb::systemd::UnitResponse, Status> {
         Err(Status::unimplemented("agent boilerplate"))
     }
 
     async fn freeze_unit(
         &self,
-        _request: Request<givc_common::pb::systemd::UnitRequest>,
-    ) -> Result<Response<givc_common::pb::systemd::UnitResponse>, Status> {
+        _request: givc_common::pb::systemd::UnitRequest,
+    ) -> Result<givc_common::pb::systemd::UnitResponse, Status> {
         Err(Status::unimplemented("agent boilerplate"))
     }
 
     async fn unfreeze_unit(
         &self,
-        _request: Request<givc_common::pb::systemd::UnitRequest>,
-    ) -> Result<Response<givc_common::pb::systemd::UnitResponse>, Status> {
+        _request: givc_common::pb::systemd::UnitRequest,
+    ) -> Result<givc_common::pb::systemd::UnitResponse, Status> {
         Err(Status::unimplemented("agent boilerplate"))
     }
 
@@ -69,15 +70,36 @@ impl givc_common::pb::systemd::unit_control_service_server::UnitControlService
 
     async fn monitor_unit(
         &self,
-        _request: Request<givc_common::pb::systemd::UnitResourceRequest>,
-    ) -> Result<Response<Self::MonitorUnitStream>, Status> {
+        _request: givc_common::pb::systemd::UnitResourceRequest,
+    ) -> Result<Self::MonitorUnitStream, Status> {
         Err(Status::unimplemented("agent boilerplate"))
     }
 
     async fn start_application(
         &self,
-        _request: Request<givc_common::pb::systemd::AppUnitRequest>,
-    ) -> Result<Response<givc_common::pb::systemd::UnitResponse>, Status> {
+        _request: givc_common::pb::systemd::AppUnitRequest,
+    ) -> Result<givc_common::pb::systemd::UnitResponse, Status> {
         Err(Status::unimplemented("agent boilerplate"))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use givc_common::pb::systemd::unit_control_service_server::UnitControlService as UnitControl;
+    use tonic::Request;
+
+    #[tokio::test]
+    async fn handler_keeps_status_code() {
+        let server = UnitControlService::new();
+        let err = server
+            .get_unit_status(Request::new(givc_common::pb::systemd::UnitRequest {
+                unit_name: "agent.service".to_owned(),
+            }))
+            .await
+            .expect_err("boilerplate service is not implemented");
+
+        assert_eq!(err.code(), tonic::Code::Unimplemented);
+        assert!(err.message().contains("agent boilerplate"), "{err}");
     }
 }
