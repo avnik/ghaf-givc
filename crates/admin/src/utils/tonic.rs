@@ -1,15 +1,32 @@
 // SPDX-FileCopyrightText: 2025-2026 TII (SSRC) and the Ghaf contributors
 // SPDX-License-Identifier: Apache-2.0
 
+use anyhow::anyhow;
 use std::pin::Pin;
-use tonic::{Code, Response, Status};
-use tonic_types::{ErrorDetails, StatusExt};
+use thiserror::Error;
+use tonic::{Code, Status};
 use tracing::{debug, error};
 
 use crate::admin::registry::NotRegistered;
 
 pub(crate) type Stream<T> =
     Pin<Box<dyn tokio_stream::Stream<Item = Result<T, Status>> + Send + 'static>>;
+
+#[derive(Debug, Error)]
+pub(crate) enum AdminError {
+    #[error("invalid request: {0}")]
+    InvalidRequest(String),
+}
+
+impl AdminError {
+    pub(crate) fn invalid_request(message: impl Into<String>) -> Self {
+        Self::InvalidRequest(message.into())
+    }
+}
+
+pub(crate) fn invalid_request(message: impl Into<String>) -> anyhow::Error {
+    anyhow!(AdminError::invalid_request(message))
+}
 
 /// Is this error just "the caller asked about something not registered yet"?
 ///
@@ -27,6 +44,13 @@ fn is_expected_miss(err: &anyhow::Error) -> bool {
 // suggests to pass by-value here.
 #[allow(clippy::needless_pass_by_value)]
 pub(crate) fn wrap_error(any_err: anyhow::Error) -> tonic::Status {
+    // Preserve a status that was wrapped in anyhow without cloning it. This
+    // matters for helpers returning anyhow::Result that use `?` on a Status.
+    let any_err = match any_err.downcast::<tonic::Status>() {
+        Ok(status) => return status,
+        Err(any_err) => any_err,
+    };
+
     // Convert root cause and stack to strings
     let stack: Vec<_> = any_err.chain().skip(1).map(ToString::to_string).collect();
     let cause = any_err.root_cause().to_string();
@@ -44,14 +68,21 @@ pub(crate) fn wrap_error(any_err: anyhow::Error) -> tonic::Status {
         }
     }
 
-    // ...then pack to ErrorDetails
-    let err_details = ErrorDetails::with_debug_info(stack, cause);
-    // Generate error status
-    Status::with_error_details(
-        Code::InvalidArgument,
-        "request contains invalid arguments",
-        err_details,
-    )
+    // Generate a stable public status. Detailed causes are logged server-side
+    // and are not exposed through the gRPC response.
+    let code = if is_expected_miss(&any_err) {
+        Code::NotFound
+    } else if any_err.downcast_ref::<AdminError>().is_some() {
+        Code::InvalidArgument
+    } else {
+        Code::Internal
+    };
+    let message = match code {
+        Code::NotFound => "service is not registered",
+        Code::InvalidArgument => "request contains invalid arguments",
+        _ => "internal server error",
+    };
+    Status::new(code, message)
 }
 
 pub(crate) trait WrapError<T> {
@@ -63,18 +94,6 @@ impl<T> WrapError<T> for Result<T, anyhow::Error> {
     fn wrap_error(self) -> Result<T, tonic::Status> {
         self.map_err(wrap_error)
     }
-}
-
-/// Wrap function `fun` converting unwrapping incoming `tonic::Request<T>`
-/// Also rewrap result, processing error conversion from `anyhow` to `tonic`
-/// # Errors
-/// Return `Err(tonic::Status)` if inner function fails
-pub async fn escalate<T, R>(
-    req: tonic::Request<T>,
-    fun: impl AsyncFnOnce(T) -> anyhow::Result<R>,
-) -> Result<tonic::Response<R>, tonic::Status> {
-    let result = fun(req.into_inner()).await;
-    result.map(Response::new).wrap_error()
 }
 
 #[cfg(test)]
@@ -103,5 +122,27 @@ mod tests {
             !is_expected_miss(&err),
             "an unrelated error must keep error-level logging"
         );
+    }
+
+    #[test]
+    fn wrapped_status_is_preserved() {
+        let expected =
+            Status::with_details(Code::PermissionDenied, "access denied", "details".into());
+        let actual = wrap_error(anyhow::Error::new(expected));
+
+        assert_eq!(actual.code(), Code::PermissionDenied);
+        assert_eq!(actual.message(), "access denied");
+        assert!(actual.details().is_empty());
+    }
+
+    #[test]
+    fn registry_miss_maps_to_not_found() {
+        let error = Registry::new()
+            .by_name("missing.service")
+            .expect_err("empty registry must not resolve a name");
+        let status = wrap_error(error);
+
+        assert_eq!(status.code(), Code::NotFound);
+        assert_eq!(status.message(), "service is not registered");
     }
 }

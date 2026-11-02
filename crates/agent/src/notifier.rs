@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 use givc_common::{pb, tonic::RewrapErr};
+use givc_macros::grpc_server;
 use tokio::io::AsyncWriteExt;
 use tokio::net::UnixStream;
 use tonic::{Request, Response, Status};
@@ -43,18 +44,17 @@ impl UserNotifierServer {
     }
 }
 
-#[tonic::async_trait]
+#[grpc_server]
 impl pb::notify::user_notification_service_server::UserNotificationService for UserNotifierServer {
     async fn notify_user(
         &self,
-        request: Request<pb::notify::UserNotification>,
-    ) -> Result<Response<pb::notify::Status>, Status> {
-        let notification = request.into_inner();
-        let json = notification_to_json(&notification).into_bytes();
+        request: pb::notify::UserNotification,
+    ) -> Result<pb::notify::Status, Status> {
+        let json = notification_to_json(&request).into_bytes();
         self.broadcast_notification(&json).await.rewrap_err()?;
-        Ok(Response::new(pb::notify::Status {
+        Ok(pb::notify::Status {
             status: "Notification sent".to_owned(),
-        }))
+        })
     }
 }
 

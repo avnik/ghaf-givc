@@ -11,13 +11,14 @@ use anyhow::{Context, Result, bail};
 use givc_client::endpoint::EndpointConfig;
 use givc_common::address::EndpointAddress;
 use givc_common::pb;
+use givc_macros::grpc_server;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{UnixListener, UnixStream};
 use tokio::sync::{Notify, mpsc};
 use tokio_stream::StreamExt;
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::transport::Server;
-use tonic::{Request, Response, Status};
+use tonic::{Request, Status};
 use tracing::{error, info, warn};
 
 use crate::config::{AgentConfig, ProxyConfig};
@@ -249,32 +250,27 @@ impl SocketProxyService {
     }
 }
 
-#[tonic::async_trait]
+#[grpc_server]
 impl pb::socketproxy::socket_stream_server::SocketStream for SocketProxyService {
     type TransferDataStream = ReceiverStream<Result<pb::socketproxy::StreamFrame, Status>>;
 
     async fn transfer_data(
         &self,
-        request: Request<tonic::Streaming<pb::socketproxy::StreamFrame>>,
-    ) -> Result<Response<Self::TransferDataStream>, Status> {
+        request: tonic::Streaming<pb::socketproxy::StreamFrame>,
+    ) -> Result<Self::TransferDataStream, Status> {
         if !self.socket_controller.run_as_server {
             return Err(Status::failed_precondition("socket proxy runs as client"));
         }
 
-        let conn = self
-            .socket_controller
-            .dial()
-            .await
-            .map_err(|err| Status::internal(err.to_string()))?;
+        let conn = self.socket_controller.dial().await?;
         let (tx, rx) = mpsc::channel(32);
-        let inbound = request.into_inner();
         let service = self.clone();
 
         tokio::spawn(async move {
-            service.stream_server_connection(inbound, conn, tx).await;
+            service.stream_server_connection(request, conn, tx).await;
         });
 
-        Ok(Response::new(ReceiverStream::new(rx)))
+        Ok(ReceiverStream::new(rx))
     }
 }
 

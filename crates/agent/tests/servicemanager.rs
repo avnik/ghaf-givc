@@ -2,9 +2,12 @@ use std::sync::Arc;
 
 use givc_agent::config::ApplicationManifest;
 use givc_agent::servicemanager::{
-    BackendCall, RunningUnit, ServiceManager, Snapshot, SystemdBackend,
+    BackendCall, RunningUnit, ServiceManager, Snapshot, SystemdBackend, UnitControlService,
 };
+use givc_common::pb::systemd::UnitRequest;
+use givc_common::pb::systemd::unit_control_service_server::UnitControlService as UnitControl;
 use tokio_stream::StreamExt;
+use tonic::Request;
 
 #[derive(Clone, Default)]
 struct FakeBackend {
@@ -406,4 +409,41 @@ async fn monitor_unit_streams_samples() {
         ]
     );
     assert!(samples.into_iter().all(|item| item.is_ok()));
+}
+
+#[tokio::test]
+async fn unit_control_handler_returns_unit_status() {
+    let backend = FakeBackend::default();
+    let manager = ServiceManager::new(vec!["foo.service".to_owned()], vec![], backend);
+    let service = UnitControlService::new(manager);
+
+    let response = service
+        .get_unit_status(Request::new(UnitRequest {
+            unit_name: "foo.service".to_owned(),
+        }))
+        .await
+        .expect("whitelisted unit is allowed");
+
+    let status = response
+        .into_inner()
+        .unit_status
+        .expect("unit status is set");
+    assert_eq!(status.name, "foo.service");
+}
+
+#[tokio::test]
+async fn unit_control_handler_denies_unwhitelisted_unit() {
+    let backend = FakeBackend::default();
+    let manager = ServiceManager::new(vec!["foo.service".to_owned()], vec![], backend);
+    let service = UnitControlService::new(manager);
+
+    let error = service
+        .get_unit_status(Request::new(UnitRequest {
+            unit_name: "bar.service".to_owned(),
+        }))
+        .await
+        .expect_err("unit is not whitelisted");
+
+    assert_eq!(error.code(), tonic::Code::PermissionDenied);
+    assert!(error.message().contains("whitelisted"), "{error}");
 }

@@ -10,11 +10,12 @@ use async_stream::try_stream;
 use givc_common::query::Event;
 use regex::Regex;
 use tokio::sync::Mutex;
-use tonic::{Code, Response, Status};
+use tonic::{Code, Status};
 use tracing::{debug, error, info, trace};
 
 use givc_client::endpoint::{EndpointConfig, TlsConfig};
 use givc_common::query::QueryResult;
+use givc_macros::grpc_server;
 use givc_policyadmin::policy::run_policy_admin;
 use givc_policyadmin::policy_manager::{PolicyManager, Update, UpdateReceiver};
 
@@ -36,7 +37,7 @@ use crate::pb::{
 use crate::systemd_api::client::SystemDClient;
 use crate::types::{ServiceType, UnitType, VmType};
 use crate::utils::naming::VmName;
-use crate::utils::tonic::{Stream, escalate};
+use crate::utils::tonic::{Stream, invalid_request};
 
 pub use pb::admin_service_server::AdminServiceServer;
 
@@ -541,14 +542,12 @@ fn app_success() -> anyhow::Result<ApplicationResponse> {
     Ok(res)
 }
 
-#[tonic::async_trait]
+#[grpc_server(map_err = crate::utils::tonic::wrap_error, log = false)]
 impl pb::admin_service_server::AdminService for AdminService {
     async fn register_service(
         &self,
-        request: tonic::Request<RegistryRequest>,
-    ) -> std::result::Result<tonic::Response<pb::RegistryResponse>, tonic::Status> {
-        let req = request.into_inner();
-
+        req: RegistryRequest,
+    ) -> std::result::Result<pb::RegistryResponse, tonic::Status> {
         info!("Registering service {:?}", req);
         let entry = RegistryEntry::try_from(req)
             .map_err(|e| Status::new(Code::InvalidArgument, format!("{e}")))?;
@@ -617,466 +616,368 @@ impl pb::admin_service_server::AdminService for AdminService {
             });
         }
         debug!("Responding with {res:?}");
-        Ok(Response::new(res))
+        Ok(res)
     }
 
     async fn start_application(
         &self,
-        request: tonic::Request<ApplicationRequest>,
-    ) -> std::result::Result<tonic::Response<StartResponse>, tonic::Status> {
-        escalate(request, |req| async {
-            let app_name = self.inner.start_app(req).await?;
-            Ok(StartResponse {
-                registry_id: app_name,
-            })
+        request: ApplicationRequest,
+    ) -> std::result::Result<StartResponse, tonic::Status> {
+        let app_name = self.inner.start_app(request).await?;
+        Ok(StartResponse {
+            registry_id: app_name,
         })
-        .await
     }
 
     async fn start_vm(
         &self,
-        request: tonic::Request<StartVmRequest>,
-    ) -> std::result::Result<tonic::Response<StartResponse>, tonic::Status> {
-        escalate(request, async move |req| {
-            let vm_name = VmName::Vm(&req.vm_name);
-            self.inner.start_vm(&vm_name.vm_service()).await?;
-            Ok(StartResponse {
-                registry_id: vm_name.agent_service(),
-            })
+        request: StartVmRequest,
+    ) -> std::result::Result<StartResponse, tonic::Status> {
+        let vm_name = VmName::Vm(&request.vm_name);
+        self.inner.start_vm(&vm_name.vm_service()).await?;
+        Ok(StartResponse {
+            registry_id: vm_name.agent_service(),
         })
-        .await
     }
 
     async fn start_service(
         &self,
-        request: tonic::Request<givc_common::pb::ServiceRequest>,
-    ) -> std::result::Result<tonic::Response<StartResponse>, tonic::Status> {
-        escalate(request, async move |req| {
-            let registry_id = self
-                .inner
-                .start_unit_on_vm(&req.service_name, &req.vm_name)
-                .await?;
-            Ok(StartResponse { registry_id })
-        })
-        .await
+        request: givc_common::pb::ServiceRequest,
+    ) -> std::result::Result<StartResponse, tonic::Status> {
+        let registry_id = self
+            .inner
+            .start_unit_on_vm(&request.service_name, &request.vm_name)
+            .await?;
+        Ok(StartResponse { registry_id })
     }
 
     async fn stop_service(
         &self,
-        request: tonic::Request<givc_common::pb::ServiceRequest>,
-    ) -> std::result::Result<tonic::Response<ApplicationResponse>, tonic::Status> {
-        escalate(request, async move |req| {
-            self.inner
-                .stop_unit_on_vm(&req.service_name, &req.vm_name)
-                .await?;
-            app_success()
-        })
-        .await
+        request: givc_common::pb::ServiceRequest,
+    ) -> std::result::Result<ApplicationResponse, tonic::Status> {
+        self.inner
+            .stop_unit_on_vm(&request.service_name, &request.vm_name)
+            .await?;
+        app_success()
     }
 
     async fn pause_application(
         &self,
-        request: tonic::Request<ApplicationRequest>,
-    ) -> std::result::Result<tonic::Response<ApplicationResponse>, tonic::Status> {
-        escalate(request, async move |req| {
-            let agent = self.inner.agent_endpoint(&req.app_name)?;
-            let client = SystemDClient::new(agent);
-            for each in self.inner.app_entries(&req.app_name)? {
-                let name = each.clone();
-                let status = client.pause_remote(each).await?;
-                if !status.is_paused() {
-                    bail!("Failed to pause {name}");
-                }
+        request: ApplicationRequest,
+    ) -> std::result::Result<ApplicationResponse, tonic::Status> {
+        let agent = self.inner.agent_endpoint(&request.app_name)?;
+        let client = SystemDClient::new(agent);
+        for each in self.inner.app_entries(&request.app_name)? {
+            let name = each.clone();
+            let status = client.pause_remote(each).await?;
+            if !status.is_paused() {
+                bail!("Failed to pause {name}");
             }
-            app_success()
-        })
-        .await
+        }
+        app_success()
     }
 
     async fn resume_application(
         &self,
-        request: tonic::Request<ApplicationRequest>,
-    ) -> std::result::Result<tonic::Response<ApplicationResponse>, tonic::Status> {
-        escalate(request, async move |req| {
-            let agent = self.inner.agent_endpoint(&req.app_name)?;
-            let client = SystemDClient::new(agent);
-            for each in self.inner.app_entries(&req.app_name)? {
-                let name = each.clone();
-                let status = client.resume_remote(each).await?;
-                if !status.is_running() {
-                    bail!("Failed to resume {name}");
-                }
+        request: ApplicationRequest,
+    ) -> std::result::Result<ApplicationResponse, tonic::Status> {
+        let agent = self.inner.agent_endpoint(&request.app_name)?;
+        let client = SystemDClient::new(agent);
+        for each in self.inner.app_entries(&request.app_name)? {
+            let name = each.clone();
+            let status = client.resume_remote(each).await?;
+            if !status.is_running() {
+                bail!("Failed to resume {name}");
             }
-            app_success()
-        })
-        .await
+        }
+        app_success()
     }
 
     async fn stop_application(
         &self,
-        request: tonic::Request<ApplicationRequest>,
-    ) -> std::result::Result<tonic::Response<ApplicationResponse>, tonic::Status> {
-        escalate(request, async move |req| {
-            let agent = self.inner.agent_endpoint(&req.app_name)?;
-            let client = SystemDClient::new(agent);
-            for each in self.inner.app_entries(&req.app_name)? {
-                let name = each.clone();
-                let status = client.stop_remote(each).await?;
-                if !status.is_exitted() {
-                    bail!("Failed to stop {name}");
-                }
+        request: ApplicationRequest,
+    ) -> std::result::Result<ApplicationResponse, tonic::Status> {
+        let agent = self.inner.agent_endpoint(&request.app_name)?;
+        let client = SystemDClient::new(agent);
+        for each in self.inner.app_entries(&request.app_name)? {
+            let name = each.clone();
+            let status = client.stop_remote(each).await?;
+            if !status.is_exitted() {
+                bail!("Failed to stop {name}");
             }
-            app_success()
-        })
-        .await
+        }
+        app_success()
     }
 
-    async fn poweroff(
-        &self,
-        request: tonic::Request<Empty>,
-    ) -> std::result::Result<tonic::Response<Empty>, tonic::Status> {
-        escalate(request, |_| async {
-            self.inner
-                .send_system_command(String::from("poweroff.target"))
-                .await?;
-            Ok(Empty {})
-        })
-        .await
+    async fn poweroff(&self, _request: Empty) -> std::result::Result<Empty, tonic::Status> {
+        self.inner
+            .send_system_command(String::from("poweroff.target"))
+            .await?;
+        Ok(Empty {})
     }
 
-    async fn reboot(
-        &self,
-        request: tonic::Request<Empty>,
-    ) -> std::result::Result<tonic::Response<Empty>, tonic::Status> {
-        escalate(request, |_| async {
-            self.inner
-                .send_system_command(String::from("reboot.target"))
-                .await?;
-            Ok(Empty {})
-        })
-        .await
+    async fn reboot(&self, _request: Empty) -> std::result::Result<Empty, tonic::Status> {
+        self.inner
+            .send_system_command(String::from("reboot.target"))
+            .await?;
+        Ok(Empty {})
     }
 
-    async fn suspend(
-        &self,
-        request: tonic::Request<Empty>,
-    ) -> std::result::Result<tonic::Response<Empty>, tonic::Status> {
-        escalate(request, |_| async {
-            self.inner
-                .send_system_command(String::from("suspend.target"))
-                .await?;
-            Ok(Empty {})
-        })
-        .await
+    async fn suspend(&self, _request: Empty) -> std::result::Result<Empty, tonic::Status> {
+        self.inner
+            .send_system_command(String::from("suspend.target"))
+            .await?;
+        Ok(Empty {})
     }
 
-    async fn wakeup(
-        &self,
-        _request: tonic::Request<Empty>,
-    ) -> std::result::Result<tonic::Response<Empty>, tonic::Status> {
+    async fn wakeup(&self, _request: Empty) -> std::result::Result<Empty, tonic::Status> {
         println!("Not supported");
         Err(Status::unimplemented("Not supported"))
     }
 
     async fn sysinfo(
         &self,
-        request: tonic::Request<Empty>,
-    ) -> std::result::Result<tonic::Response<pb::stats::SysinfoResponse>, tonic::Status> {
-        escalate(request, |_| self.inner.get_sysinfo()).await
+        _request: Empty,
+    ) -> std::result::Result<pb::stats::SysinfoResponse, tonic::Status> {
+        Ok(self.inner.get_sysinfo().await?)
     }
 
-    async fn query_list(
-        &self,
-        request: tonic::Request<Empty>,
-    ) -> Result<tonic::Response<QueryListResponse>, tonic::Status> {
-        escalate(request, |_| async {
-            let list = self
-                .inner
-                .registry
-                .contents()
-                .into_iter()
-                .map(QueryResult::from)
-                .map(From::from)
-                .collect();
-            Ok(QueryListResponse { list })
-        })
-        .await
+    async fn query_list(&self, _request: Empty) -> Result<QueryListResponse, tonic::Status> {
+        let list = self
+            .inner
+            .registry
+            .contents()
+            .into_iter()
+            .map(QueryResult::from)
+            .map(From::from)
+            .collect();
+        Ok(QueryListResponse { list })
     }
 
     async fn get_unit_status(
         &self,
-        request: tonic::Request<UnitStatusRequest>,
-    ) -> Result<tonic::Response<pb::systemd::UnitStatus>, tonic::Status> {
-        escalate(
-            request,
-            async move |UnitStatusRequest { unit_name, vm_name }| {
-                let vm_name = VmName::Vm(&vm_name).agent_service();
-                self.inner.get_unit_status(vm_name, unit_name).await
-            },
-        )
-        .await
+        request: UnitStatusRequest,
+    ) -> Result<pb::systemd::UnitStatus, tonic::Status> {
+        let UnitStatusRequest { unit_name, vm_name } = request;
+        let vm_name = VmName::Vm(&vm_name).agent_service();
+        self.inner.get_unit_status(vm_name, unit_name).await
     }
 
     async fn set_locale(
         &self,
-        request: tonic::Request<LocaleRequest>,
-    ) -> std::result::Result<tonic::Response<Empty>, tonic::Status> {
-        escalate(request, async move |req| {
-            if req.assignments.is_empty() {
-                bail!("No locale assignments provided");
+        request: LocaleRequest,
+    ) -> std::result::Result<Empty, tonic::Status> {
+        if request.assignments.is_empty() {
+            return Err(invalid_request("No locale assignments provided"));
+        }
+        for pb::locale::LocaleAssignment { value, key } in &request.assignments {
+            if value.is_empty() {
+                return Err(invalid_request(format!("Empty locale value for {key}")));
             }
-            for pb::locale::LocaleAssignment { value, key } in &req.assignments {
-                if value.is_empty() {
-                    bail!("Empty locale value for {key}");
-                }
-                if !Validator::validate_locale(value) {
-                    bail!("Invalid locale value {value}");
+            if !Validator::validate_locale(value) {
+                return Err(invalid_request(format!("Invalid locale value {value}")));
+            }
+        }
+
+        let content = request
+            .assignments
+            .iter()
+            .map(|a| {
+                pb::locale::LocaleMacroKey::try_from(a.key)
+                    .map_err(anyhow::Error::from)
+                    .map(|key| format!("{}={}", key.as_str_name(), a.value))
+            })
+            .collect::<anyhow::Result<Vec<_>>>()?
+            .join("\n");
+        let _ = tokio::fs::write(LOCALE_CONF, content).await;
+
+        let managers = self.inner.registry.filter_map(|re| {
+            (re.r#type.service == ServiceType::Mgr)
+                .then_some(())
+                .and_then(|()| self.inner.endpoint(re).ok())
+        });
+        let assignments = request.assignments.clone();
+        tokio::spawn(async move {
+            let localemsg = pb::locale::LocaleMessage { assignments };
+            for ec in managers {
+                if let Ok(conn) = ec.connect().await {
+                    let mut client =
+                        pb::locale::locale_client_client::LocaleClientClient::new(conn);
+                    let _ = client.locale_set(localemsg.clone()).await;
                 }
             }
+        });
+        *self.inner.locale_assigns.lock().await = request.assignments;
 
-            let content = req
-                .assignments
-                .iter()
-                .map(|a| {
-                    pb::locale::LocaleMacroKey::try_from(a.key)
-                        .map(|key| format!("{}={}", key.as_str_name(), a.value))
-                })
-                .collect::<Result<Vec<_>, _>>()?
-                .join("\n");
-            let _ = tokio::fs::write(LOCALE_CONF, content).await;
-
-            let managers = self.inner.registry.filter_map(|re| {
-                (re.r#type.service == ServiceType::Mgr)
-                    .then_some(())
-                    .and_then(|()| self.inner.endpoint(re).ok())
-            });
-            let assignments = req.assignments.clone();
-            tokio::spawn(async move {
-                let localemsg = pb::locale::LocaleMessage { assignments };
-                for ec in managers {
-                    if let Ok(conn) = ec.connect().await {
-                        let mut client =
-                            pb::locale::locale_client_client::LocaleClientClient::new(conn);
-                        let _ = client.locale_set(localemsg.clone()).await;
-                    }
-                }
-            });
-            *self.inner.locale_assigns.lock().await = req.assignments;
-
-            Ok(Empty {})
-        })
-        .await
+        Ok(Empty {})
     }
 
     async fn set_timezone(
         &self,
-        request: tonic::Request<TimezoneRequest>,
-    ) -> std::result::Result<tonic::Response<Empty>, tonic::Status> {
-        escalate(request, async move |req| {
-            if !Validator::validate_timezone(&req.timezone) {
-                bail!("Invalid timezone");
-            }
-            let _ = tokio::fs::write(TIMEZONE_CONF, &req.timezone).await;
-            let managers = self.inner.registry.filter_map(|re| {
-                (re.r#type.service == ServiceType::Mgr)
-                    .then_some(())
-                    .and_then(|()| self.inner.endpoint(re).ok())
-            });
-            let timezone = req.timezone.clone();
-            tokio::spawn(async move {
-                for ec in managers {
-                    if let Ok(conn) = ec.connect().await {
-                        let mut client =
-                            pb::locale::locale_client_client::LocaleClientClient::new(conn);
-                        let tzmsg = pb::locale::TimezoneMessage {
-                            timezone: timezone.clone(),
-                        };
-                        let _ = client.timezone_set(tzmsg).await;
-                    }
+        request: TimezoneRequest,
+    ) -> std::result::Result<Empty, tonic::Status> {
+        if !Validator::validate_timezone(&request.timezone) {
+            bail!("Invalid timezone");
+        }
+        let _ = tokio::fs::write(TIMEZONE_CONF, &request.timezone).await;
+        let managers = self.inner.registry.filter_map(|re| {
+            (re.r#type.service == ServiceType::Mgr)
+                .then_some(())
+                .and_then(|()| self.inner.endpoint(re).ok())
+        });
+        let timezone = request.timezone.clone();
+        tokio::spawn(async move {
+            for ec in managers {
+                if let Ok(conn) = ec.connect().await {
+                    let mut client =
+                        pb::locale::locale_client_client::LocaleClientClient::new(conn);
+                    let tzmsg = pb::locale::TimezoneMessage {
+                        timezone: timezone.clone(),
+                    };
+                    let _ = client.timezone_set(tzmsg).await;
                 }
-            });
-            *self.inner.timezone.lock().await = req.timezone;
-            Ok(Empty {})
-        })
-        .await
+            }
+        });
+        *self.inner.timezone.lock().await = request.timezone;
+        Ok(Empty {})
     }
 
     async fn get_stats(
         &self,
-        request: tonic::Request<pb::StatsRequest>,
-    ) -> tonic::Result<tonic::Response<pb::stats::StatsResponse>> {
-        escalate(request, async move |req| {
-            let vm_name = VmName::Vm(&req.vm_name).agent_service();
-            let vm = self
-                .inner
-                .registry
-                .find_map(|re| {
-                    (re.r#type.service == ServiceType::Mgr && re.name == vm_name)
-                        .then(|| self.inner.endpoint(re))
-                })
-                .with_context(|| format!("VM {vm_name} not found"))??;
-            Ok(vm
-                .connect()
-                .await
-                .map(pb::stats::stats_service_client::StatsServiceClient::new)?
-                .get_stats(pb::stats::StatsRequest {})
-                .await?
-                .into_inner())
-        })
-        .await
+        request: pb::StatsRequest,
+    ) -> std::result::Result<pb::stats::StatsResponse, tonic::Status> {
+        let vm_name = VmName::Vm(&request.vm_name).agent_service();
+        let vm = self
+            .inner
+            .registry
+            .find_map(|re| {
+                (re.r#type.service == ServiceType::Mgr && re.name == vm_name)
+                    .then(|| self.inner.endpoint(re))
+            })
+            .with_context(|| format!("VM {vm_name} not found"))??;
+        Ok(vm
+            .connect()
+            .await
+            .map(pb::stats::stats_service_client::StatsServiceClient::new)?
+            .get_stats(pb::stats::StatsRequest {})
+            .await?
+            .into_inner())
     }
 
     type WatchStream = Stream<WatchItem>;
-    async fn watch(
-        &self,
-        request: tonic::Request<Empty>,
-    ) -> Result<tonic::Response<Self::WatchStream>, tonic::Status> {
-        escalate(request, |_| async {
-            let (initial_list, mut chan) = self.inner.registry.subscribe();
+    async fn watch(&self, _request: Empty) -> Result<Self::WatchStream, tonic::Status> {
+        let (initial_list, mut chan) = self.inner.registry.subscribe();
 
-            let stream = try_stream! {
-                yield Event::into_initial(initial_list);
+        let stream = try_stream! {
+            yield Event::into_initial(initial_list);
 
-                loop {
-                    match chan.recv().await {
-                        Ok(event) => {
-                            yield event.into()
-                        },
-                        Err(e) => {
-                            error!("Failed to receive subscription item from registry: {e}");
-                            break;
-                        },
-                     }
+            loop {
+                match chan.recv().await {
+                    Ok(event) => {
+                        yield event.into()
+                    },
+                    Err(e) => {
+                        error!("Failed to receive subscription item from registry: {e}");
+                        break;
+                    },
                  }
-            };
-            Ok(Box::pin(stream) as Self::WatchStream)
-        })
-        .await
+             }
+        };
+        Ok(Box::pin(stream) as Self::WatchStream)
     }
 
     // User notification
     async fn notify_user(
         &self,
-        request: tonic::Request<pb::admin::UserNotificationRequest>,
-    ) -> Result<tonic::Response<pb::notify::Status>, tonic::Status> {
-        escalate(request, async move |req| {
-            let vm_name = VmName::Vm(&req.vm_name).agent_service();
-            self.inner
-                .notify_user(vm_name, req.notification.unwrap_or_default())
-                .await
-        })
-        .await
+        request: pb::admin::UserNotificationRequest,
+    ) -> Result<pb::notify::Status, tonic::Status> {
+        let vm_name = VmName::Vm(&request.vm_name).agent_service();
+        self.inner
+            .notify_user(vm_name, request.notification.unwrap_or_default())
+            .await
     }
 
     // OTA
     async fn list_generations(
         &self,
-        request: tonic::Request<crate::pb::update::Empty>,
-    ) -> Result<tonic::Response<ListGenerationsResponse>, tonic::Status> {
-        escalate(request, async |_| {
-            let endpoint = self.inner.host_endpoint()?;
-            let ota = super::OTA::OTA::new(endpoint);
-            let list = ota.list().await?;
-            Ok(ListGenerationsResponse { list })
-        })
-        .await
+        _request: crate::pb::update::Empty,
+    ) -> Result<ListGenerationsResponse, tonic::Status> {
+        let endpoint = self.inner.host_endpoint()?;
+        let ota = super::OTA::OTA::new(endpoint);
+        let list = ota.list().await?;
+        Ok(ListGenerationsResponse { list })
     }
 
     async fn discover(
         &self,
-        request: tonic::Request<RegistryDiscoverRequest>,
-    ) -> Result<tonic::Response<RegistryDiscoverResponse>, tonic::Status> {
-        escalate(request, async move |req| {
-            let endpoint = self.inner.net_vm_endpoint()?;
-            let ota = super::OTA::OTA::new(endpoint);
-            Ok(RegistryDiscoverResponse {
-                list: ota.discover(req).await?,
-            })
+        request: RegistryDiscoverRequest,
+    ) -> Result<RegistryDiscoverResponse, tonic::Status> {
+        let endpoint = self.inner.net_vm_endpoint()?;
+        let ota = super::OTA::OTA::new(endpoint);
+        Ok(RegistryDiscoverResponse {
+            list: ota.discover(request).await?,
         })
-        .await
     }
 
     async fn changelog(
         &self,
-        request: tonic::Request<RegistryChangelogRequest>,
-    ) -> Result<tonic::Response<RegistryChangelogResponse>, tonic::Status> {
-        escalate(request, async move |req| {
-            let endpoint = self.inner.net_vm_endpoint()?;
-            let ota = super::OTA::OTA::new(endpoint);
-            Ok(RegistryChangelogResponse {
-                changelog: ota.changelog(req).await?,
-            })
+        request: RegistryChangelogRequest,
+    ) -> Result<RegistryChangelogResponse, tonic::Status> {
+        let endpoint = self.inner.net_vm_endpoint()?;
+        let ota = super::OTA::OTA::new(endpoint);
+        Ok(RegistryChangelogResponse {
+            changelog: ota.changelog(request).await?,
         })
-        .await
     }
 
     type PullStream = super::OTA::PullStream;
-    async fn pull(
-        &self,
-        request: tonic::Request<RegistryPullRequest>,
-    ) -> Result<tonic::Response<Self::PullStream>, tonic::Status> {
-        escalate(request, async move |req| {
-            let endpoint = self.inner.net_vm_endpoint()?;
-            let ota = super::OTA::OTA::new(endpoint);
-            let stream = ota.pull(req).await?;
-            Ok(stream)
-        })
-        .await
+    async fn pull(&self, request: RegistryPullRequest) -> Result<Self::PullStream, tonic::Status> {
+        let endpoint = self.inner.net_vm_endpoint()?;
+        let ota = super::OTA::OTA::new(endpoint);
+        ota.pull(request).await
     }
 
     type ImageInstallStream = super::OTA::ImageInstallStream;
     async fn image_install(
         &self,
-        request: tonic::Request<ImageInstallRequest>,
-    ) -> Result<tonic::Response<Self::ImageInstallStream>, tonic::Status> {
-        escalate(request, async move |req| {
-            let endpoint = self.inner.host_endpoint()?;
-            let ota = super::OTA::OTA::new(endpoint);
-            let stream = ota.image_install(req).await?;
-            Ok(stream)
-        })
-        .await
+        request: ImageInstallRequest,
+    ) -> Result<Self::ImageInstallStream, tonic::Status> {
+        let endpoint = self.inner.host_endpoint()?;
+        let ota = super::OTA::OTA::new(endpoint);
+        ota.image_install(request).await
     }
 
     type SetGenerationStream = super::OTA::SetGenerationStream;
     async fn set_generation(
         &self,
-        request: tonic::Request<SetGenerationRequest>,
-    ) -> Result<tonic::Response<Self::SetGenerationStream>, tonic::Status> {
-        escalate(request, async move |req| {
-            let endpoint = self.inner.host_endpoint()?;
-            let ota = super::OTA::OTA::new(endpoint);
-            match req.update {
-                Some(crate::pb::update::set_generation_request::Update::Cachix(cachix_request)) => {
-                    let stream = ota.install_via_cachix(cachix_request).await?;
-                    Ok(Box::pin(stream) as Self::SetGenerationStream)
-                }
-                _ => anyhow::bail!("unimplemented update method"),
+        request: SetGenerationRequest,
+    ) -> Result<Self::SetGenerationStream, tonic::Status> {
+        let endpoint = self.inner.host_endpoint()?;
+        let ota = super::OTA::OTA::new(endpoint);
+        match request.update {
+            Some(crate::pb::update::set_generation_request::Update::Cachix(cachix_request)) => {
+                let stream = ota.install_via_cachix(cachix_request).await?;
+                Ok::<_, anyhow::Error>(Box::pin(stream) as Self::SetGenerationStream)
             }
-        })
-        .await
+            _ => anyhow::bail!("unimplemented update method"),
+        }
     }
 
-    async fn ctap(
-        &self,
-        request: tonic::Request<CtapRequest>,
-    ) -> Result<tonic::Response<CtapResponse>, tonic::Status> {
-        escalate(request, async move |req| {
-            let gui_vm_mgr = self
-                .inner
-                .agent_endpoint("givc-gui-vm.service")
-                .context("VM not found")?;
-            let mut client = pb::ctap::ctap_client::CtapClient::new(gui_vm_mgr.connect().await?);
+    async fn ctap(&self, request: CtapRequest) -> Result<CtapResponse, tonic::Status> {
+        let gui_vm_mgr = self
+            .inner
+            .agent_endpoint("givc-gui-vm.service")
+            .context("VM not found")?;
+        let mut client = pb::ctap::ctap_client::CtapClient::new(gui_vm_mgr.connect().await?);
 
-            Ok(client.ctap(req).await?.into_inner())
-        })
-        .await
+        Ok(client.ctap(request).await?.into_inner())
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::pb::admin_service_server::AdminService as AdminServiceTrait;
 
     #[test]
     fn test_locale_validator() -> anyhow::Result<()> {
@@ -1125,5 +1026,21 @@ mod tests {
             bail!("Invalid timezone accepted");
         }
         Ok(())
+    }
+
+    #[tokio::test]
+    async fn grpc_macro_returns_safe_admin_error() {
+        let service = AdminService::new(None, false, false, None, None)
+            .expect("admin service initializes without optional policy admin");
+        let error = service
+            .set_locale(tonic::Request::new(LocaleRequest {
+                assignments: Vec::new(),
+            }))
+            .await
+            .expect_err("empty locale assignments are rejected");
+
+        assert_eq!(error.code(), tonic::Code::InvalidArgument);
+        assert_eq!(error.message(), "request contains invalid arguments");
+        assert!(error.details().is_empty());
     }
 }

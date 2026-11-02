@@ -7,11 +7,13 @@ use std::time::Duration;
 use crate::config::ApplicationManifest;
 use anyhow::{Result, bail};
 use givc_common::pb;
+use givc_macros::grpc_server;
 use procfs::Current;
 use regex::Regex;
+use thiserror::Error;
 use tokio::sync::mpsc;
 use tokio::time::Instant;
-use tonic::{Request, Response, Status};
+use tonic::Status;
 
 pub use pb::systemd::unit_control_service_server::UnitControlServiceServer;
 
@@ -53,6 +55,24 @@ pub struct ApplicationStartPlan {
     pub service_name: String,
     pub app_name: String,
     pub command: Vec<String>,
+}
+
+#[derive(Debug, Error)]
+enum ServiceManagerError {
+    #[error("unit {name} is not whitelisted")]
+    NotWhitelisted { name: String },
+    #[error("application {0} is not found in the manifest")]
+    ApplicationNotFound(String),
+}
+
+impl ServiceManagerError {
+    fn not_whitelisted(name: impl Into<String>) -> Self {
+        Self::NotWhitelisted { name: name.into() }
+    }
+
+    fn application_not_found(name: impl Into<String>) -> Self {
+        Self::ApplicationNotFound(name.into())
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -121,7 +141,7 @@ where
         if self.is_unit_whitelisted(name) {
             Ok(())
         } else {
-            bail!("unit is not whitelisted")
+            Err(ServiceManagerError::not_whitelisted(name).into())
         }
     }
 
@@ -271,7 +291,7 @@ where
             .applications
             .iter()
             .find(|candidate| candidate.name == app_name)
-            .ok_or_else(|| anyhow::anyhow!("application not found in manifest"))?;
+            .ok_or_else(|| ServiceManagerError::application_not_found(app_name))?;
 
         if let Some(arg) = service_args
             .iter()
@@ -721,63 +741,57 @@ where
     }
 }
 
-#[tonic::async_trait]
+#[grpc_server(map_err = map_err)]
 impl<B> pb::systemd::unit_control_service_server::UnitControlService for UnitControlService<B>
 where
     B: SystemdBackend + 'static,
 {
     async fn get_unit_status(
         &self,
-        request: Request<pb::systemd::UnitRequest>,
-    ) -> Result<Response<pb::systemd::UnitResponse>, Status> {
-        let unit = request.into_inner().unit_name;
-        let snapshot = self.manager.get_unit_status(&unit).await.map_err(map_err)?;
-        Ok(Response::new(to_unit_response(snapshot)))
+        request: pb::systemd::UnitRequest,
+    ) -> Result<pb::systemd::UnitResponse, Status> {
+        let snapshot = self.manager.get_unit_status(&request.unit_name).await?;
+        Ok(to_unit_response(snapshot))
     }
 
     async fn start_unit(
         &self,
-        request: Request<pb::systemd::UnitRequest>,
-    ) -> Result<Response<pb::systemd::UnitResponse>, Status> {
-        let unit = request.into_inner().unit_name;
-        let snapshot = self.manager.start_unit(&unit).await.map_err(map_err)?;
-        Ok(Response::new(to_unit_response(snapshot)))
+        request: pb::systemd::UnitRequest,
+    ) -> Result<pb::systemd::UnitResponse, Status> {
+        let snapshot = self.manager.start_unit(&request.unit_name).await?;
+        Ok(to_unit_response(snapshot))
     }
 
     async fn stop_unit(
         &self,
-        request: Request<pb::systemd::UnitRequest>,
-    ) -> Result<Response<pb::systemd::UnitResponse>, Status> {
-        let unit = request.into_inner().unit_name;
-        let snapshot = self.manager.stop_unit(&unit).await.map_err(map_err)?;
-        Ok(Response::new(to_unit_response(snapshot)))
+        request: pb::systemd::UnitRequest,
+    ) -> Result<pb::systemd::UnitResponse, Status> {
+        let snapshot = self.manager.stop_unit(&request.unit_name).await?;
+        Ok(to_unit_response(snapshot))
     }
 
     async fn kill_unit(
         &self,
-        request: Request<pb::systemd::UnitRequest>,
-    ) -> Result<Response<pb::systemd::UnitResponse>, Status> {
-        let unit = request.into_inner().unit_name;
-        let snapshot = self.manager.kill_unit(&unit).await.map_err(map_err)?;
-        Ok(Response::new(to_unit_response(snapshot)))
+        request: pb::systemd::UnitRequest,
+    ) -> Result<pb::systemd::UnitResponse, Status> {
+        let snapshot = self.manager.kill_unit(&request.unit_name).await?;
+        Ok(to_unit_response(snapshot))
     }
 
     async fn freeze_unit(
         &self,
-        request: Request<pb::systemd::UnitRequest>,
-    ) -> Result<Response<pb::systemd::UnitResponse>, Status> {
-        let unit = request.into_inner().unit_name;
-        let snapshot = self.manager.freeze_unit(&unit).await.map_err(map_err)?;
-        Ok(Response::new(to_unit_response(snapshot)))
+        request: pb::systemd::UnitRequest,
+    ) -> Result<pb::systemd::UnitResponse, Status> {
+        let snapshot = self.manager.freeze_unit(&request.unit_name).await?;
+        Ok(to_unit_response(snapshot))
     }
 
     async fn unfreeze_unit(
         &self,
-        request: Request<pb::systemd::UnitRequest>,
-    ) -> Result<Response<pb::systemd::UnitResponse>, Status> {
-        let unit = request.into_inner().unit_name;
-        let snapshot = self.manager.thaw_unit(&unit).await.map_err(map_err)?;
-        Ok(Response::new(to_unit_response(snapshot)))
+        request: pb::systemd::UnitRequest,
+    ) -> Result<pb::systemd::UnitResponse, Status> {
+        let snapshot = self.manager.thaw_unit(&request.unit_name).await?;
+        Ok(to_unit_response(snapshot))
     }
 
     type MonitorUnitStream =
@@ -785,24 +799,21 @@ where
 
     async fn monitor_unit(
         &self,
-        request: Request<pb::systemd::UnitResourceRequest>,
-    ) -> Result<Response<Self::MonitorUnitStream>, Status> {
-        let unit = request.into_inner().unit_name;
-        let stream = self.manager.monitor_unit(&unit).await.map_err(map_err)?;
-        Ok(Response::new(stream))
+        request: pb::systemd::UnitResourceRequest,
+    ) -> Result<Self::MonitorUnitStream, Status> {
+        let stream = self.manager.monitor_unit(&request.unit_name).await?;
+        Ok(stream)
     }
 
     async fn start_application(
         &self,
-        request: Request<pb::systemd::AppUnitRequest>,
-    ) -> Result<Response<pb::systemd::UnitResponse>, Status> {
-        let req = request.into_inner();
+        request: pb::systemd::AppUnitRequest,
+    ) -> Result<pb::systemd::UnitResponse, Status> {
         let snapshot = self
             .manager
-            .start_application(&req.unit_name, req.args)
-            .await
-            .map_err(map_err)?;
-        Ok(Response::new(to_unit_response(snapshot)))
+            .start_application(&request.unit_name, request.args)
+            .await?;
+        Ok(to_unit_response(snapshot))
     }
 }
 
