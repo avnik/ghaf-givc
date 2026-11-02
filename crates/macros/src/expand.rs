@@ -260,9 +260,7 @@ impl VisitMut for BodyRewriter {
         if let Expr::Match(match_expr) = expr {
             self.visit_expr_mut(&mut match_expr.expr);
             for arm in &mut match_expr.arms {
-                if let Some((_, guard)) = &mut arm.guard {
-                    self.visit_expr_mut(guard);
-                }
+                self.visit_pat_mut(&mut arm.pat);
                 self.visit_result_expr_mut(&mut arm.body);
             }
             return;

@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 use givc_common::{pb, tonic::RewrapErr};
+use givc_macros::grpc_server;
 use tokio::io::AsyncWriteExt;
 use tokio::net::UnixStream;
 use tonic::{Request, Response, Status};

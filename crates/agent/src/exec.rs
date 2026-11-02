@@ -6,6 +6,7 @@ use std::process::Stdio;
 use std::sync::Arc;
 
 use givc_common::pb;
+use givc_macros::grpc_server;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt};
 use tokio::process::Command;
 use tokio::sync::Mutex;
@@ -46,7 +47,7 @@ impl pb::exec::exec_server::Exec for ExecService {
 
     async fn run_command(
         &self,
-        request: tonic::Streaming<pb::exec::CommandRequest>,
+        mut request: tonic::Streaming<pb::exec::CommandRequest>,
     ) -> Result<Self::RunCommandStream, Status> {
         let first = request
             .message()

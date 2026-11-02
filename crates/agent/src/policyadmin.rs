@@ -7,6 +7,7 @@ use std::sync::Mutex;
 
 use anyhow::{Result, bail};
 use givc_common::{pb, tonic::RewrapErr};
+use givc_macros::grpc_server;
 use sha2::{Digest, Sha256};
 use tokio::fs;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -101,7 +102,7 @@ impl PolicyAdminServer {
 impl pb::policyadmin::policy_admin_server::PolicyAdmin for PolicyAdminServer {
     async fn stream_policy(
         &self,
-        request: tonic::Streaming<pb::policyadmin::StreamPolicyRequest>,
+        mut request: tonic::Streaming<pb::policyadmin::StreamPolicyRequest>,
     ) -> Result<pb::policyadmin::Status, Status> {
         let mut policy_name = String::new();
         let mut temp_file: Option<PathBuf> = None;

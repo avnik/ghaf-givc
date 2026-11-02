@@ -18,6 +18,7 @@ use givc_common::address::EndpointAddress;
 use givc_common::pb::reflection::EVENT_DESCRIPTOR;
 use givc_common::types::TransportConfig as CommonTransportConfig;
 use givc_common::{pb, tonic::RewrapErr};
+use givc_macros::grpc_server;
 use tokio::runtime::Handle;
 use tokio::sync::mpsc;
 use tokio_stream::StreamExt;
@@ -216,7 +217,7 @@ impl pb::eventproxy::event_service_server::EventService for EventProxyServer {
 
     async fn stream_events(
         &self,
-        request: tonic::Streaming<pb::eventproxy::InputEvent>,
+        mut request: tonic::Streaming<pb::eventproxy::InputEvent>,
     ) -> Result<pb::eventproxy::Ack, Status> {
         loop {
             match request.next().await {

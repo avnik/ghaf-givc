@@ -7,6 +7,7 @@ use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
 use givc_common::{pb, tonic::RewrapErr};
+use givc_macros::grpc_server;
 use serde_json::Value as JsonValue;
 use thiserror::Error;
 use tokio::time::sleep;
@@ -251,10 +252,10 @@ impl pb::wifi::wifi_service_server::WifiService for WifiService {
 
     async fn get_active_connection(
         &self,
-        _request: Request<pb::wifi::EmptyRequest>,
-    ) -> Result<Response<pb::wifi::AccessPoint>, Status> {
+        _request: pb::wifi::EmptyRequest,
+    ) -> Result<pb::wifi::AccessPoint, Status> {
         if let Some(ap) = self.backend.active_connection().await.rewrap_err()? {
-            return Ok(Response::new(ap.into()));
+            return Ok(ap.into());
         }
 
         Ok(pb::wifi::AccessPoint {
@@ -271,34 +272,34 @@ impl pb::wifi::wifi_service_server::WifiService for WifiService {
     ) -> Result<pb::wifi::WifiConnectionResponse, Status> {
         let response = self
             .backend
-            .connect(&req.ssid, &req.password, &req.settings)
+            .connect(&request.ssid, &request.password, &request.settings)
             .await
             .rewrap_err()?;
-        Ok(Response::new(pb::wifi::WifiConnectionResponse { response }))
+        Ok(pb::wifi::WifiConnectionResponse { response })
     }
 
     async fn disconnect_network(
         &self,
-        _request: Request<pb::wifi::EmptyRequest>,
-    ) -> Result<Response<pb::wifi::WifiConnectionResponse>, Status> {
+        _request: pb::wifi::EmptyRequest,
+    ) -> Result<pb::wifi::WifiConnectionResponse, Status> {
         let response = self.backend.disconnect().await.rewrap_err()?;
-        Ok(Response::new(pb::wifi::WifiConnectionResponse { response }))
+        Ok(pb::wifi::WifiConnectionResponse { response })
     }
 
     async fn turn_on(
         &self,
-        _request: Request<pb::wifi::EmptyRequest>,
-    ) -> Result<Response<pb::wifi::WifiConnectionResponse>, Status> {
+        _request: pb::wifi::EmptyRequest,
+    ) -> Result<pb::wifi::WifiConnectionResponse, Status> {
         let response = self.backend.radio_switch(true).await.rewrap_err()?;
-        Ok(Response::new(pb::wifi::WifiConnectionResponse { response }))
+        Ok(pb::wifi::WifiConnectionResponse { response })
     }
 
     async fn turn_off(
         &self,
-        _request: Request<pb::wifi::EmptyRequest>,
-    ) -> Result<Response<pb::wifi::WifiConnectionResponse>, Status> {
+        _request: pb::wifi::EmptyRequest,
+    ) -> Result<pb::wifi::WifiConnectionResponse, Status> {
         let response = self.backend.radio_switch(false).await.rewrap_err()?;
-        Ok(Response::new(pb::wifi::WifiConnectionResponse { response }))
+        Ok(pb::wifi::WifiConnectionResponse { response })
     }
 }
 

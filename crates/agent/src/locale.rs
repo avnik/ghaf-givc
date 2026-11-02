@@ -6,6 +6,7 @@ use std::process::Command;
 
 use anyhow::{Context, Result, bail, ensure};
 use givc_common::{pb, tonic::RewrapErr};
+use givc_macros::grpc_server;
 use regex::Regex;
 use tonic::Status;
 

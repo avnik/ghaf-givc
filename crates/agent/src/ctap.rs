@@ -5,6 +5,7 @@ use std::process::Stdio;
 
 use anyhow::{Result, bail};
 use givc_common::{pb, tonic::RewrapErr};
+use givc_macros::grpc_server;
 use tokio::io::AsyncWriteExt;
 use tokio::process::Command;
 use tonic::{Request, Response, Status};

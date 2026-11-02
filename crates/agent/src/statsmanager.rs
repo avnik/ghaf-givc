@@ -8,6 +8,7 @@ use std::sync::Mutex;
 
 use anyhow::{Result, bail};
 use givc_common::tonic::RewrapErr;
+use givc_macros::grpc_server;
 use procfs::Current;
 use tonic::Status;
 
