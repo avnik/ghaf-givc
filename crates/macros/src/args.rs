@@ -3,14 +3,15 @@
 
 //! Options accepted by the `#[grpc_server]` attribute macro.
 
+use darling::FromMeta;
 use syn::parse::{Parse, ParseStream};
-use syn::{Error, Ident, LitBool, Path, Token};
+use syn::{Ident, Path};
 
 /// Options accepted by `#[grpc_server(...)]`.
 ///
 /// The same options are understood on the impl block and on a single method;
 /// the method level options win over the impl block ones.
-#[derive(Clone, Default)]
+#[derive(Clone, Default, FromMeta)]
 pub(crate) struct Args {
     /// `fn(anyhow::Error) -> tonic::Status` used to map handler failures.
     ///
@@ -23,6 +24,7 @@ pub(crate) struct Args {
     /// Whether handler failures are logged. Defaults to `true`.
     pub(crate) log: Option<bool>,
     /// Leave the method untouched.
+    #[darling(default)]
     pub(crate) skip: bool,
 }
 
@@ -43,58 +45,9 @@ impl Args {
 
 impl Parse for Args {
     fn parse(input: ParseStream) -> syn::Result<Self> {
-        let mut args = Args::default();
-
-        while !input.is_empty() {
-            let name: Ident = input.parse().map_err(|_| {
-                Error::new(
-                    input.span(),
-                    "expected an option name: `map_err`, `into`, `log` or `skip`",
-                )
-            })?;
-
-            match name.to_string().as_str() {
-                "map_err" => {
-                    input.parse::<Token![=]>()?;
-                    args.map_err = Some(input.parse()?);
-                }
-                "into" => {
-                    input.parse::<Token![=]>()?;
-                    args.into = Some(input.parse()?);
-                }
-                "log" => {
-                    args.log = if input.peek(Token![=]) {
-                        input.parse::<Token![=]>()?;
-                        Some(parse_bool(input)?)
-                    } else {
-                        Some(true)
-                    };
-                }
-                "skip" => {
-                    args.skip = true;
-                }
-                other => {
-                    return Err(Error::new(
-                        name.span(),
-                        format!(
-                            "unknown option `{other}`; expected `map_err`, `into`, `log` or `skip`"
-                        ),
-                    ));
-                }
-            }
-
-            if input.is_empty() {
-                break;
-            }
-            input.parse::<Token![,]>()?;
-        }
-
-        Ok(args)
+        let tokens = input.parse()?;
+        let metas = darling::ast::NestedMeta::parse_meta_list(tokens)
+            .map_err(|error| syn::Error::new(input.span(), error.to_string()))?;
+        Self::from_list(&metas).map_err(|error| syn::Error::new(input.span(), error.to_string()))
     }
-}
-
-/// Parses a boolean literal.
-fn parse_bool(input: ParseStream) -> syn::Result<bool> {
-    let literal: LitBool = input.parse()?;
-    Ok(literal.value)
 }
